@@ -19,6 +19,7 @@
   --danger: #e74c3c;
   --today-bg: #e94560;
   --today-text: #fff;
+  --puppy-color: #f0c080;
 }
 
 body {
@@ -43,10 +44,16 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 14px;
+  padding: 6px 14px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   -webkit-app-region: drag;
+}
+
+.title-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .title-text {
@@ -84,6 +91,229 @@ body {
 .title-btn-close:hover {
   background: var(--danger);
   color: #fff;
+}
+
+.puppy-wrapper {
+  width: 50px;
+  height: 44px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+}
+
+.puppy-svg {
+  width: 50px;
+  height: 44px;
+  overflow: visible;
+}
+
+.puppy-body-shape {
+  transition: all 0.8s ease;
+}
+
+.puppy-head {
+  transition: transform 0.5s ease;
+  transform-origin: 30px 18px;
+}
+
+.puppy-ear-left,
+.puppy-ear-right {
+  transition: transform 0.5s ease;
+  transform-origin: center;
+}
+
+.puppy-tail {
+  transition: d 0.6s ease, transform 0.6s ease;
+  transform-origin: 50px 36px;
+}
+
+.puppy-eye-left,
+.puppy-eye-right {
+  transition: r 0.4s ease, fill 0.4s ease, cy 0.4s ease;
+}
+
+.puppy-nose {
+  transition: all 0.5s ease;
+}
+
+.puppy-mouth {
+  transition: all 0.5s ease;
+}
+
+.sleep-indicator {
+  transition: opacity 0.5s ease;
+}
+
+.awake-indicator > * {
+  transition: opacity 0.5s ease;
+}
+
+.puppy-wrapper.sleeping .sleep-indicator {
+  opacity: 1;
+}
+
+.puppy-wrapper.sleeping .awake-indicator > * {
+  opacity: 0;
+}
+
+.puppy-wrapper.sleeping .puppy-head {
+  transform: translateY(28px);
+}
+
+.puppy-wrapper.sleeping .puppy-body-shape {
+  cy: 40;
+  rx: 24;
+  ry: 8;
+}
+
+.puppy-wrapper.sleeping .puppy-ear-left {
+  transform: rotate(-15deg) translate(0, 3px);
+}
+
+.puppy-wrapper.sleeping .puppy-ear-right {
+  transform: rotate(15deg) translate(0, 3px);
+}
+
+.puppy-wrapper.sleeping .puppy-eye-left,
+.puppy-wrapper.sleeping .puppy-eye-right {
+  r: 1;
+  cy: 22;
+  fill: #555;
+}
+
+.puppy-wrapper.sleeping .puppy-mouth {
+  y2: 23;
+  stroke-width: 1;
+}
+
+.puppy-wrapper.sleeping .puppy-nose {
+  cy: 23;
+  r: 2;
+}
+
+.puppy-wrapper.sleeping .puppy-tail {
+  d: path("M50 36 Q54 38 50 40");
+}
+
+.z-text {
+  transition: all 1.5s ease;
+}
+
+.puppy-wrapper.sleeping .z1 {
+  animation: zFloat 2.5s ease-in-out infinite;
+}
+
+.puppy-wrapper.sleeping .z2 {
+  animation: zFloat 2.5s ease-in-out 0.4s infinite;
+}
+
+.puppy-wrapper.sleeping .z3 {
+  animation: zFloat 2.5s ease-in-out 0.8s infinite;
+}
+
+@keyframes zFloat {
+  0%, 100% { opacity: 0; transform: translateY(0); }
+  20% { opacity: 0.8; }
+  80% { opacity: 0.6; }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+.puppy-wrapper.awake .sleep-indicator {
+  opacity: 0;
+}
+
+.puppy-wrapper.awake .awake-indicator > * {
+  opacity: 0;
+}
+
+.puppy-wrapper.awake .puppy-head {
+  transform: translateY(0);
+  animation: headBob 1.5s ease-in-out infinite;
+}
+
+@keyframes headBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.puppy-wrapper.awake .puppy-body-shape {
+  animation: bodyBreathe 2s ease-in-out infinite;
+}
+
+@keyframes bodyBreathe {
+  0%, 100% { ry: 10; }
+  50% { ry: 9; }
+}
+
+.puppy-wrapper.awake .puppy-ear-left {
+  animation: earWiggleL 0.8s ease-in-out infinite;
+}
+
+@keyframes earWiggleL {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-8deg); }
+}
+
+.puppy-wrapper.awake .puppy-ear-right {
+  animation: earWiggleR 0.8s ease-in-out infinite;
+}
+
+@keyframes earWiggleR {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(8deg); }
+}
+
+.puppy-wrapper.awake .puppy-eye-left,
+.puppy-wrapper.awake .puppy-eye-right {
+  r: 2.5;
+  cy: 15;
+  fill: #333;
+  animation: eyeShine 2s ease-in-out infinite;
+}
+
+@keyframes eyeShine {
+  0%, 45%, 55%, 100% { r: 2.5; }
+  50% { r: 1.8; }
+}
+
+.puppy-wrapper.awake .puppy-mouth {
+  y2: 28;
+  stroke-width: 1.5;
+}
+
+.puppy-wrapper.awake .puppy-nose {
+  cy: 20;
+  r: 2.5;
+}
+
+.puppy-wrapper.awake .puppy-tail {
+  d: path("M50 36 Q58 28 52 22");
+  animation: tailWag 0.4s ease-in-out infinite alternate;
+  transform-origin: 50px 36px;
+}
+
+@keyframes tailWag {
+  0% { transform: rotate(-10deg); }
+  100% { transform: rotate(10deg); }
+}
+
+.puppy-wrapper.awake .puppy-blush-left,
+.puppy-wrapper.awake .puppy-blush-right {
+  opacity: 1;
+}
+
+.puppy-wrapper.awake .bubble-text {
+  opacity: 1;
+  animation: bubblePop 1.2s ease-out infinite;
+}
+
+@keyframes bubblePop {
+  0% { opacity: 0; transform: scale(0.5); }
+  30% { opacity: 1; transform: scale(1.2); }
+  60% { opacity: 0.8; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.8) translateY(-4px); }
 }
 
 #main-content {
@@ -587,7 +817,8 @@ body {
 }
 
 .form-group input[type="text"],
-.form-group input[type="date"] {
+.form-group input[type="date"],
+.form-group input[type="password"] {
   padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -600,7 +831,8 @@ body {
 }
 
 .form-group input[type="text"]:focus,
-.form-group input[type="date"]:focus {
+.form-group input[type="date"]:focus,
+.form-group input[type="password"]:focus {
   border-color: var(--accent);
 }
 

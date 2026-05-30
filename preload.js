@@ -11,9 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkMicPermission: () => ipcRenderer.invoke('check-mic-permission'),
   requestMicPermission: () => ipcRenderer.invoke('request-mic-permission'),
 
-  voiceIflytekInit: (config) => ipcRenderer.invoke('voice-iflytek-init', config),
-  voiceIflytekStart: () => ipcRenderer.invoke('voice-iflytek-start'),
-  voiceIflytekStop: () => ipcRenderer.invoke('voice-iflytek-stop'),
+  voiceSnowboyInit: (config) => ipcRenderer.invoke('voice-snowboy-init', config),
+  voiceSnowboyStart: () => ipcRenderer.invoke('voice-snowboy-start'),
+  voiceSnowboyStop: () => ipcRenderer.invoke('voice-snowboy-stop'),
   voiceQwenConfigure: (config) => ipcRenderer.invoke('voice-qwen-configure', config),
   voiceQwenProcessText: (text) => ipcRenderer.invoke('voice-qwen-process-text', text),
   voiceSaveConfig: (config) => ipcRenderer.invoke('voice-save-config', config),
@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   onVoiceWakeupDetected: (callback) => {
     ipcRenderer.on('voice-wakeup-detected', (event, data) => callback(data));
-  }
+  },
+  logToMain: (level, msg) => ipcRenderer.send('renderer-log', { level, msg })
 });

@@ -22,7 +22,8 @@
     "electron-builder": "^24.9.1"
   },
   "dependencies": {
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "snowboy": "^1.3.1"
   },
   "build": {
     "appId": "com.smartcal.app",
@@ -46,8 +47,8 @@
     ],
     "extraResources": [
       {
-        "from": "libs/",
-        "to": "libs/"
+        "from": "assets/",
+        "to": "assets/"
       }
     ]
   }
