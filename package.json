@@ -5,7 +5,9 @@
   "main": "main.js",
   "electronMirror": "https://npmmirror.com/mirrors/electron/",
   "scripts": {
-    "start": "electron .",
+    "start": "chcp 65001 > nul 2>&1 & electron .",
+    "start:ps": "powershell -Command \"[Console]::OutputEncoding=[Text.Encoding]::UTF8; npm run electron-start\"",
+    "electron-start": "electron .",
     "build": "electron-builder --win portable",
     "build:dir": "electron-builder --win portable --dir",
     "postinstall": "electron-builder install-app-deps"
@@ -22,7 +24,7 @@
     "electron-builder": "^24.9.1"
   },
   "dependencies": {
-    "ws": "^8.16.0"
+    "ws": "^8.21.0"
   },
   "build": {
     "appId": "com.smartcal.app",
@@ -46,8 +48,8 @@
     ],
     "extraResources": [
       {
-        "from": "libs/",
-        "to": "libs/"
+        "from": "assets/",
+        "to": "assets/"
       }
     ]
   }
