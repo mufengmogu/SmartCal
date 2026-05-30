@@ -3,34 +3,89 @@ const VoiceManager = {
   isWoken: false,
   mediaStream: null,
   audioContext: null,
-  useNativeSDK: false,
-  wakeWord: '小日历',
+  wakeWord: '重启',
   silenceTimer: null,
   voiceConfig: {},
+  puppyAwakeTimer: null,
+  detectionMethod: 'iflytek-asr',
+  _debugLogs: [],
+  _audioProcessor: null,
+  _asrConnected: false,
+  _lastText: '',
+
+  log(level, msg) {
+    const ts = new Date().toLocaleTimeString();
+    const entry = `[Voice ${ts}] [${level}] ${msg}`;
+    this._debugLogs.push(entry);
+    if (this._debugLogs.length > 200) this._debugLogs.shift();
+    console.log(entry);
+    if (window.electronAPI && window.electronAPI.logToMain) {
+      window.electronAPI.logToMain(level, msg);
+    }
+  },
 
   async init() {
     this.voiceConfig = await window.electronAPI.voiceLoadConfig();
+    this.log('info', '初始化完成, config=' + JSON.stringify(this.voiceConfig));
     this.bindEvents();
+    window.VoiceManager = this;
+    window.simulateWakeup = () => this.testWakeup();
+    window.showVoiceLogs = () => {
+      console.table(this._debugLogs.map((l, i) => ({ idx: i, log: l })));
+    };
   },
 
   bindEvents() {
     document.getElementById('voice-toggle').addEventListener('change', async (e) => {
       if (e.target.checked) {
+        this.log('info', '语音开关 -> 打开');
         await this.enableVoice();
       } else {
+        this.log('info', '语音开关 -> 关闭');
         this.disableVoice();
       }
     });
 
-    window.electronAPI.onVoiceWakeupDetected((data) => {
-      if (data && data.keyword) {
-        this.onNativeWakeupDetected(data.keyword);
+    window.electronAPI.onVoiceAsrResult((data) => {
+      if (!data || !data.text) return;
+
+      if (data.text) {
+        console.log('[ASR转写] ' + data.text + (data.isFinal ? ' [最终]' : ''));
+      }
+
+      const transcriptEl = document.getElementById('asr-transcript');
+      const transcriptTextEl = document.getElementById('asr-transcript-text');
+      if (transcriptEl && transcriptTextEl && data.fullText) {
+        transcriptEl.classList.remove('hidden');
+        transcriptTextEl.textContent = data.fullText;
+      }
+
+      if (data.fullText && data.fullText.includes(this.wakeWord)) {
+        this.log('event', '>>> 检测到关键词"' + this.wakeWord + '"！完整文本: ' + data.fullText);
+        if (!this.isWoken) {
+          this.onWakeupDetected();
+        }
+      }
+    });
+
+    window.electronAPI.onVoiceAsrStatus((data) => {
+      if (data.status === 'started') {
+        this._asrConnected = true;
+        this.showVoiceStatus('转写已启动，等待关键词..."' + this.wakeWord + '"', 'idle');
+        this.log('info', '讯飞转写已启动');
+      } else if (data.status === 'error') {
+        this.log('error', '讯飞转写错误: ' + data.msg);
+        this.showVoiceStatus('转写出错: ' + data.msg, 'idle');
+      } else if (data.status === 'closed') {
+        this._asrConnected = false;
+        this.log('warn', '讯飞连接已关闭');
       }
     });
   },
 
   async enableVoice() {
     try {
+      this.log('info', '正在请求麦克风权限...');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -40,89 +95,160 @@ const VoiceManager = {
         }
       });
 
+      this.log('info', '麦克风权限已获取, audioTracks=' + stream.getAudioTracks().length);
       this.mediaStream = stream;
       this.isEnabled = true;
-      this.showVoiceStatus('正在初始化...', 'idle');
 
-      if (this.voiceConfig.iflytek && this.voiceConfig.iflytek.appId) {
-        await this.initNativeSDK();
+      this.showVoiceStatus('正在连接讯飞实时转写...', 'idle');
+      const startResult = await window.electronAPI.voiceAsrStart();
+
+      if (!startResult.success) {
+        this.log('error', '讯飞 ASR 启动失败: ' + (startResult.error || '未知错误'));
+        this.showVoiceStatus('转写连接失败: ' + startResult.error, 'idle');
+        return;
       }
 
-      this.showVoiceStatus('等待唤醒...说出"' + this.wakeWord + '"', 'idle');
-      this.startWakeWordDetection();
+      this.log('info', '讯飞 ASR 连接成功，开始音频流传输');
+      this.showVoiceStatus('等待关键词..."' + this.wakeWord + '"', 'idle');
+
+      this.startAudioStream();
     } catch (err) {
+      this.log('error', '麦克风权限失败: ' + err.message);
       alert('麦克风权限获取失败，请在系统设置中允许麦克风访问。');
       document.getElementById('voice-toggle').checked = false;
       this.isEnabled = false;
     }
   },
 
-  async initNativeSDK() {
-    const iflytekCfg = this.voiceConfig.iflytek;
-    const result = await window.electronAPI.voiceIflytekInit({
-      appId: iflytekCfg.appId,
-      apiKey: iflytekCfg.apiKey,
-      apiSecret: iflytekCfg.apiSecret
-    });
+  startAudioStream() {
+    if (!this.mediaStream || !this.isEnabled) return;
 
-    if (result.success && !result.fallback) {
-      this.useNativeSDK = true;
-      await window.electronAPI.voiceIflytekStart();
-      console.log('[Voice] 科大讯飞原生SDK已启动');
-    } else {
-      console.log('[Voice] 使用浏览器内置语音识别');
+    try {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000
+      });
+    } catch (e) {
+      this.log('error', '无法创建 AudioContext: ' + e.message);
+      return;
     }
+
+    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+
+    const bufferSize = 2048;
+    const processor = source.context.createScriptProcessor(bufferSize, 1, 1);
+    this._audioProcessor = processor;
+
+    processor.onaudioprocess = (event) => {
+      if (!this.isEnabled) return;
+
+      const input = event.inputBuffer.getChannelData(0);
+      const pcmBuffer = this.float32ToInt16(input);
+
+      window.electronAPI.voiceAsrSendAudio(pcmBuffer.buffer);
+    };
+
+    source.connect(processor);
+    processor.connect(source.context.destination);
+
+    this.log('info', '音频流传输已启动, bufferSize=' + bufferSize + ', sampleRate=16000');
+  },
+
+  float32ToInt16(float32Array) {
+    const int16Array = new Int16Array(float32Array.length);
+    for (let i = 0; i < float32Array.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32Array[i]));
+      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return int16Array;
   },
 
   disableVoice() {
+    this.log('info', '关闭语音...');
     this.isEnabled = false;
     this.isWoken = false;
+    this._asrConnected = false;
+    this.setPuppySleeping();
+
+    if (this.puppyAwakeTimer) {
+      clearTimeout(this.puppyAwakeTimer);
+      this.puppyAwakeTimer = null;
+    }
+
+    if (this._audioProcessor) {
+      this._audioProcessor.disconnect();
+      this._audioProcessor = null;
+    }
+
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {});
+      this.audioContext = null;
+    }
 
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach(track => track.stop());
       this.mediaStream = null;
     }
 
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
+    window.electronAPI.voiceAsrStop();
 
-    if (this._recognition) {
-      this._recognition.stop();
-      this._recognition = null;
-    }
-
-    if (this._processor) {
-      this._processor.disconnect();
-      this._processor = null;
-    }
-
-    if (this.useNativeSDK) {
-      window.electronAPI.voiceIflytekStop();
-      this.useNativeSDK = false;
-    }
-
+    this.detectionMethod = 'none';
     this.resetSilenceTimer();
     this.hideVoiceStatus();
+    this.hideTranscript();
+    this.log('info', '语音已完全关闭');
   },
 
-  onNativeWakeupDetected(keyword) {
-    if (!this.isEnabled) return;
+  onWakeupDetected() {
+    this.log('event', '>>> 关键词"' + this.wakeWord + '"被检测到！');
+    if (!this.isEnabled) {
+      this.log('warn', '检测到关键词但语音未启用，忽略');
+      return;
+    }
     this.isWoken = true;
-    this.showVoiceStatus('我在！请说话...', 'listening');
-    this.speakResponse('我在');
 
-    setTimeout(() => {
+    this.wakePuppy();
+    this.showVoiceStatus('我在！请说事件...', 'listening');
+    this.speakResponse('我在');
+    this.log('info', '小狗唤醒 + TTS 播报"我在"');
+
+    this.puppyAwakeTimer = setTimeout(() => {
       if (this.isWoken) {
+        this.log('info', '唤醒后流程：事件输入');
         this.startVoiceListening();
       }
     }, 1500);
   },
 
+  testWakeup() {
+    this.log('debug', '>>> 手动触发模拟唤醒测试');
+    if (!this.isEnabled) {
+      this.log('warn', '模拟测试失败：语音未开启。请先打开语音开关');
+      return 'FAIL: 语音未开启，请先打开语音开关';
+    }
+    this.onWakeupDetected();
+    return 'OK: 唤醒已触发，小狗应醒来并播报"我在"';
+  },
+
+  setPuppySleeping() {
+    const puppy = document.getElementById('puppy-container');
+    if (puppy) {
+      puppy.classList.remove('awake');
+      puppy.classList.add('sleeping');
+    }
+  },
+
+  wakePuppy() {
+    const puppy = document.getElementById('puppy-container');
+    if (puppy) {
+      puppy.classList.remove('sleeping');
+      puppy.classList.add('awake');
+    }
+  },
+
   showVoiceStatus(text, state) {
     const statusEl = document.getElementById('voice-status');
     const textEl = document.getElementById('voice-status-text');
+    if (!statusEl || !textEl) return;
     const dotEl = statusEl.querySelector('.voice-status-dot');
 
     statusEl.classList.remove('hidden');
@@ -134,152 +260,25 @@ const VoiceManager = {
   },
 
   hideVoiceStatus() {
-    document.getElementById('voice-status').classList.add('hidden');
+    const el = document.getElementById('voice-status');
+    if (el) el.classList.add('hidden');
   },
 
-  startWakeWordDetection() {
-    if (!this.isEnabled) return;
-
-    if (this.useNativeSDK) {
-      this.showVoiceStatus('等待唤醒...说出"' + this.wakeWord + '"', 'idle');
-      return;
-    }
-
-    if (typeof window.webkitSpeechRecognition !== 'undefined') {
-      this.useBrowserRecognition();
-    } else if (typeof window.SpeechRecognition !== 'undefined') {
-      window.webkitSpeechRecognition = window.SpeechRecognition;
-      this.useBrowserRecognition();
-    } else {
-      this.showVoiceStatus('语音唤醒已启动（简化模式）', 'idle');
-      this.useSimulatedRecognition();
-    }
-  },
-
-  useBrowserRecognition() {
-    const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'zh-CN';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event) => {
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript.trim();
-        if (transcript.includes(this.wakeWord)) {
-          this.onWakeDetected();
-          recognition.stop();
-          return;
-        }
-      }
-    };
-
-    recognition.onerror = (event) => {
-      if (event.error === 'not-allowed') {
-        this.showVoiceStatus('语音识别被拒绝', 'idle');
-        return;
-      }
-      setTimeout(() => {
-        if (this.isEnabled && !this.isWoken && recognition) {
-          try { recognition.start(); } catch (e) {}
-        }
-      }, 1000);
-    };
-
-    recognition.onend = () => {
-      if (this.isEnabled && !this.isWoken) {
-        setTimeout(() => {
-          try { recognition.start(); } catch (e) {}
-        }, 500);
-      }
-    };
-
-    try {
-      recognition.start();
-      this._recognition = recognition;
-      this.showVoiceStatus('等待唤醒...说出"' + this.wakeWord + '"', 'idle');
-    } catch (e) {
-      this.showVoiceStatus('唤醒词监听启动失败', 'idle');
-    }
-  },
-
-  useSimulatedRecognition() {
-    if (!this.isEnabled) return;
-
-    if (!this.audioContext) {
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000
-      });
-    }
-
-    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-    const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-
-    let consecutiveDetections = 0;
-
-    processor.onaudioprocess = (event) => {
-      if (!this.isEnabled || this.isWoken) return;
-
-      const inputData = event.inputBuffer.getChannelData(0);
-      const energy = this.calculateEnergy(inputData);
-      const zcr = this.calculateZCR(inputData);
-
-      if (energy > 0.02 && zcr > 0.02 && zcr < 0.12) {
-        consecutiveDetections++;
-        if (consecutiveDetections > 8) {
-          consecutiveDetections = 0;
-          this.onWakeDetected();
-        }
-      } else {
-        consecutiveDetections = Math.max(0, consecutiveDetections - 1);
-      }
-    };
-
-    source.connect(processor);
-    processor.connect(this.audioContext.destination);
-    this._processor = processor;
-    this._source = source;
-  },
-
-  calculateEnergy(buffer) {
-    let sum = 0;
-    for (let i = 0; i < buffer.length; i++) {
-      sum += buffer[i] * buffer[i];
-    }
-    return Math.sqrt(sum / buffer.length);
-  },
-
-  calculateZCR(buffer) {
-    let crossings = 0;
-    for (let i = 1; i < buffer.length; i++) {
-      if (buffer[i] * buffer[i - 1] < 0) crossings++;
-    }
-    return crossings / buffer.length;
-  },
-
-  onWakeDetected() {
-    this.isWoken = true;
-    this.showVoiceStatus('我在！请说话...', 'listening');
-    this.speakResponse('我在');
-
-    setTimeout(() => {
-      if (this.isWoken) {
-        this.startVoiceListening();
-      }
-    }, 1500);
+  hideTranscript() {
+    const el = document.getElementById('asr-transcript');
+    const textEl = document.getElementById('asr-transcript-text');
+    if (el) el.classList.add('hidden');
+    if (textEl) textEl.textContent = '';
   },
 
   async startVoiceListening() {
     if (!this.isWoken) return;
-
-    if (this.voiceConfig.qwen && this.voiceConfig.qwen.apiKey) {
-      this.showVoiceStatus('请说出您的事件安排...', 'listening');
-    }
-
+    this.log('info', '唤醒后流程：等待用户说出事件');
     this.useLocalListening();
   },
 
   useLocalListening() {
+    this.log('info', '事件输入语音识别开始');
     const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
 
     if (typeof SpeechRecognition !== 'undefined') {
@@ -290,54 +289,71 @@ const VoiceManager = {
 
       recognition.onresult = (event) => {
         const transcript = event.results[0][0].transcript.trim();
+        this.log('info', '事件语音输入识别结果: "' + transcript + '"');
         this.processVoiceInput(transcript);
       };
 
       recognition.onend = () => {
+        this.log('debug', '事件语音识别结束，重置为监听状态');
         this.resetWakeupState();
       };
 
-      recognition.onerror = () => {
-        this.resetWakeupState();
+      recognition.onerror = (e) => {
+        this.log('warn', '事件语音识别错误: ' + e.error);
+        this.showTextFallback();
       };
 
       try {
         recognition.start();
         this._recognition = recognition;
+        this.log('info', '事件语音识别已启动');
       } catch (e) {
-        this.showVoiceStatus('语音识别不可用', 'idle');
-        setTimeout(() => this.resetWakeupState(), 3000);
+        this.log('error', '事件语音识别启动失败: ' + e.message);
+        this.showTextFallback();
       }
     } else {
-      const text = prompt('请输入您的事件安排（例如：爷爷的生日在6月1日）：');
-      if (text) {
-        this.processVoiceInput(text);
-      }
-      this.resetWakeupState();
+      this.log('warn', 'SpeechRecognition不可用，使用文本输入后备');
+      this.showTextFallback();
     }
   },
 
+  showTextFallback() {
+    setTimeout(() => {
+      const text = prompt('请输入您的事件安排（例如：爷爷的生日在6月1日）：');
+      if (text) {
+        this.log('info', '文本输入: "' + text + '"');
+        this.processVoiceInput(text);
+      }
+      this.resetWakeupState();
+    }, 500);
+  },
+
   async processVoiceInput(text) {
+    this.log('info', 'processVoiceInput: "' + text + '"');
     if (!text) {
       this.resetWakeupState();
       return;
     }
 
     const qwenResult = await window.electronAPI.voiceQwenProcessText(text);
+    this.log('debug', 'Qwen解析结果: ' + JSON.stringify(qwenResult));
 
     if (qwenResult.results && qwenResult.results.length > 0) {
       for (const item of qwenResult.results) {
+        this.log('info', 'Qwen格式解析 -> name: "' + item.name + '", date: "' + item.date + '"');
         const formattedDate = this.parseDateString(item.date);
         if (formattedDate && item.name.trim()) {
           await EventsManager.addParsedEvent(item.name.trim(), formattedDate);
           this.speakResponse('已为您添加事件：' + item.name.trim());
           this.showVoiceStatus('事件已添加！', 'idle');
+          this.log('info', '事件已通过Qwen格式添加');
         }
       }
       this.resetWakeupState();
       return;
     }
 
+    this.log('info', 'Qwen无结果，尝试自然语言解析');
     this.processNaturalLanguage(text);
     this.resetWakeupState();
   },
@@ -381,6 +397,7 @@ const VoiceManager = {
       const match = text.match(regex);
       if (match) {
         const result = handler(match);
+        this.log('info', 'NL匹配: pattern=' + regex.source + ', name="' + result.name + '", date=' + result.date);
         if (result.name && result.name.trim()) {
           EventsManager.addParsedEvent(result.name.trim(), result.date);
           this.speakResponse('已为您添加事件：' + result.name.trim());
@@ -397,6 +414,7 @@ const VoiceManager = {
       const day = dateMatch[2].padStart(2, '0');
       const date = `${currentYear}-${month}-${day}`;
       const name = text.replace(datePattern, '').trim().replace(/^(在|于|的)/, '').trim();
+      this.log('info', '日期模式兜底: name="' + name + '", date=' + date);
       if (name) {
         EventsManager.addParsedEvent(name, date);
         this.speakResponse('已为您添加事件：' + name);
@@ -405,6 +423,7 @@ const VoiceManager = {
       }
     }
 
+    this.log('warn', '无法解析输入: "' + text + '"');
     this.speakResponse('抱歉，没有理解您的事件安排，请尝试说"事件名称 在 X月X日"');
     this.showVoiceStatus('未能解析事件，请重试', 'idle');
   },
@@ -426,6 +445,7 @@ const VoiceManager = {
   },
 
   speakResponse(text) {
+    this.log('info', 'TTS播报: "' + text + '"');
     if (typeof window.speechSynthesis !== 'undefined') {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
@@ -448,13 +468,17 @@ const VoiceManager = {
       this.silenceTimer = null;
     }
     this.silenceTimer = setTimeout(() => {
+      this.log('debug', '静默超时(15s)，重置唤醒状态');
       this.resetWakeupState();
     }, 15000);
   },
 
   resetWakeupState() {
     this.isWoken = false;
+    this.setPuppySleeping();
     this.resetSilenceTimer();
-    this.startWakeWordDetection();
+    this.hideTranscript();
+    window.electronAPI.voiceAsrReset();
+    this.log('info', '重置唤醒状态，继续监听关键词');
   }
 };

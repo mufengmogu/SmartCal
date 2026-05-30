@@ -11,15 +11,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkMicPermission: () => ipcRenderer.invoke('check-mic-permission'),
   requestMicPermission: () => ipcRenderer.invoke('request-mic-permission'),
 
-  voiceIflytekInit: (config) => ipcRenderer.invoke('voice-iflytek-init', config),
-  voiceIflytekStart: () => ipcRenderer.invoke('voice-iflytek-start'),
-  voiceIflytekStop: () => ipcRenderer.invoke('voice-iflytek-stop'),
+  voiceAsrStart: () => ipcRenderer.invoke('voice-asr-start'),
+  voiceAsrStop: () => ipcRenderer.invoke('voice-asr-stop'),
+  voiceAsrReset: () => ipcRenderer.invoke('voice-asr-reset'),
+  voiceAsrSendAudio: (audioData) => ipcRenderer.send('voice-asr-audio', audioData),
+
   voiceQwenConfigure: (config) => ipcRenderer.invoke('voice-qwen-configure', config),
   voiceQwenProcessText: (text) => ipcRenderer.invoke('voice-qwen-process-text', text),
   voiceSaveConfig: (config) => ipcRenderer.invoke('voice-save-config', config),
   voiceLoadConfig: () => ipcRenderer.invoke('voice-load-config'),
 
-  onVoiceWakeupDetected: (callback) => {
-    ipcRenderer.on('voice-wakeup-detected', (event, data) => callback(data));
-  }
+  onVoiceAsrResult: (callback) => {
+    ipcRenderer.on('voice-asr-result', (event, data) => callback(data));
+  },
+  onVoiceAsrStatus: (callback) => {
+    ipcRenderer.on('voice-asr-status', (event, data) => callback(data));
+  },
+  logToMain: (level, msg) => ipcRenderer.send('renderer-log', { level, msg })
 });

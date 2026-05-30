@@ -1,10 +1,13 @@
-const { app, BrowserWindow, ipcMain, dialog, systemPreferences } = require('electron');
+process.stdout.setDefaultEncoding('utf-8');
+process.stderr.setDefaultEncoding('utf-8');
+
+const { app, BrowserWindow, ipcMain, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow = null;
 let qwenClient = null;
-let iflytekWakeup = null;
+let asrManager = null;
 
 try {
   qwenClient = require('./src/qwen.js');
@@ -13,10 +16,14 @@ try {
 }
 
 try {
-  const IflytekWakeup = require('./src/iflytek.js');
-  iflytekWakeup = new IflytekWakeup();
+  const IFlytekASRManager = require('./src/iflytek-asr.js');
+  asrManager = new IFlytekASRManager();
+  asrManager.initialize().then(ok => {
+    if (ok) console.log('讯飞实时语音转写模块初始化成功');
+    else console.log('讯飞实时语音转写模块初始化失败，请检查密钥文件');
+  });
 } catch (e) {
-  console.log('科大讯飞模块加载失败，将使用浏览器内置语音识别');
+  console.log('讯飞 ASR 模块加载失败:', e.message);
 }
 
 function createWindow() {
@@ -42,7 +49,12 @@ function createWindow() {
 
 app.whenReady().then(createWindow);
 
+ipcMain.on('renderer-log', (event, { level, msg }) => {
+  console.log(`[Renderer ${level}] ${msg}`);
+});
+
 app.on('window-all-closed', () => {
+  if (asrManager) asrManager.stop();
   app.quit();
 });
 
@@ -81,9 +93,7 @@ function writeEvents(events) {
   fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2), 'utf-8');
 }
 
-ipcMain.handle('get-events', () => {
-  return readEvents();
-});
+ipcMain.handle('get-events', () => readEvents());
 
 ipcMain.handle('add-event', (event, newEvent) => {
   const events = readEvents();
@@ -127,13 +137,8 @@ ipcMain.handle('update-event', (event, updatedEvent) => {
   return events[idx];
 });
 
-ipcMain.handle('window-minimize', () => {
-  mainWindow.minimize();
-});
-
-ipcMain.handle('window-close', () => {
-  app.quit();
-});
+ipcMain.handle('window-minimize', () => { mainWindow.minimize(); });
+ipcMain.handle('window-close', () => { app.quit(); });
 
 ipcMain.handle('check-mic-permission', async () => {
   if (process.platform !== 'win32') {
@@ -152,41 +157,49 @@ ipcMain.handle('request-mic-permission', async () => {
   }
 });
 
-ipcMain.handle('voice-iflytek-init', async (event, config) => {
-  if (!iflytekWakeup) {
-    return { success: false, error: '科大讯飞SDK不可用' };
+ipcMain.handle('voice-asr-start', async () => {
+  if (!asrManager) {
+    return { success: false, error: '讯飞 ASR 模块不可用' };
   }
   try {
-    const result = await iflytekWakeup.initialize(config);
-    return { success: result, fallback: iflytekWakeup.fallbackMode };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('voice-iflytek-start', async () => {
-  if (!iflytekWakeup) {
-    return { success: false, error: '科大讯飞SDK不可用' };
-  }
-  try {
-    const result = await iflytekWakeup.startWakeup((wakeupResult) => {
-      if (mainWindow) {
-        mainWindow.webContents.send('voice-wakeup-detected', wakeupResult);
+    asrManager.setResultCallback((result) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('voice-asr-result', result);
       }
     });
-    return { success: result };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('voice-iflytek-stop', async () => {
-  if (!iflytekWakeup) return { success: true };
-  try {
-    await iflytekWakeup.stopWakeup();
+    asrManager.setStatusCallback((status, msg) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('voice-asr-status', { status, msg });
+      }
+    });
+    await asrManager.connect();
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('voice-asr-stop', async () => {
+  if (!asrManager) return { success: true };
+  try {
+    asrManager.stop();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('voice-asr-reset', async () => {
+  if (asrManager) {
+    asrManager.resetSessionText();
+    return { success: true };
+  }
+  return { success: false, error: 'ASR模块未初始化' };
+});
+
+ipcMain.on('voice-asr-audio', (event, audioData) => {
+  if (asrManager && asrManager.isRunning) {
+    asrManager.feedAudio(audioData);
   }
 });
 
