@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://*.xfyun.cn wss://*.xfyun.cn https://*.aliyuncs.com wss://*.aliyuncs.com https://dashscope.aliyuncs.com wss://dashscope.aliyuncs.com blob:; media-src 'self' blob:;">
+  <title>SmartCal - 语音智能日历</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="titlebar">
+      <span class="title-text">SmartCal 语音日历</span>
+      <div class="titlebar-actions">
+        <button class="title-btn" id="btn-minimize" title="最小化">&#x2500;</button>
+        <button class="title-btn title-btn-close" id="btn-close" title="关闭">&#x2715;</button>
+      </div>
+    </div>
+
+    <div id="main-content">
+      <div class="header-row">
+        <div class="voice-toggle-area">
+          <label class="voice-switch-label">
+            <span class="voice-icon">&#x1F399;</span>
+            <span>语音交互</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="voice-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="header-actions">
+          <button class="settings-btn" id="btn-settings" title="语音设置">&#x2699;</button>
+          <button class="add-event-btn" id="btn-add-event" title="添加事件">+</button>
+        </div>
+      </div>
+
+      <div id="voice-status" class="voice-status hidden">
+        <span class="voice-status-dot"></span>
+        <span id="voice-status-text">等待唤醒...</span>
+      </div>
+
+      <div class="calendar-container">
+        <div class="calendar-header">
+          <button class="month-nav-btn" id="btn-prev-month">&lt;</button>
+          <span class="month-year" id="month-year-display"></span>
+          <button class="month-nav-btn" id="btn-next-month">&gt;</button>
+        </div>
+        <div class="weekday-row">
+          <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+        </div>
+        <div class="days-grid" id="days-grid"></div>
+      </div>
+
+      <div class="urgent-alert hidden" id="urgent-alert">
+        <div class="urgent-alert-content">
+          <span class="urgent-alert-icon">&#x26A0;</span>
+          <span class="urgent-alert-text" id="urgent-alert-text"></span>
+        </div>
+      </div>
+
+      <div class="events-section" id="events-section">
+        <h3 class="events-title">待办事件</h3>
+        <div class="events-list" id="events-list"></div>
+        <div class="no-events hidden" id="no-events">暂无待办事项</div>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="add-event-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>添加新事件</h3>
+          <button class="modal-close-btn" id="btn-modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="event-name">事件名称</label>
+            <input type="text" id="event-name" placeholder="请输入事件名称" maxlength="50">
+          </div>
+          <div class="form-group">
+            <label for="event-date">事件提醒时间</label>
+            <input type="date" id="event-date">
+          </div>
+          <div class="form-group form-group-switch">
+            <label for="voice-remind">是否语音提醒</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="voice-remind">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-cancel" id="btn-cancel">取消</button>
+          <button class="btn btn-save" id="btn-save">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="settings-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>语音服务设置</h3>
+          <button class="modal-close-btn" id="btn-settings-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="settings-section">
+            <h4 class="settings-section-title">科大讯飞 语音唤醒</h4>
+            <div class="form-group">
+              <label for="iflytek-appid">AppID</label>
+              <input type="text" id="iflytek-appid" placeholder="请输入科大讯飞 AppID">
+            </div>
+            <div class="form-group">
+              <label for="iflytek-apikey">API Key</label>
+              <input type="text" id="iflytek-apikey" placeholder="请输入 API Key">
+            </div>
+            <div class="form-group">
+              <label for="iflytek-apisecret">API Secret</label>
+              <input type="password" id="iflytek-apisecret" placeholder="请输入 API Secret">
+            </div>
+          </div>
+          <div class="settings-divider"></div>
+          <div class="settings-section">
+            <h4 class="settings-section-title">通义千问 实时语音</h4>
+            <div class="form-group">
+              <label for="qwen-apikey">API Key (DashScope)</label>
+              <input type="password" id="qwen-apikey" placeholder="请输入通义千问 API Key">
+            </div>
+            <p class="settings-hint">获取 API Key: <a href="#" id="link-qwen-doc">DashScope 控制台</a></p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-cancel" id="btn-settings-cancel">取消</button>
+          <button class="btn btn-save" id="btn-settings-save">保存设置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="calendar.js"></script>
+  <script src="events.js"></script>
+  <script src="voice.js"></script>
+  <script src="settings.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
