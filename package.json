@@ -1,0 +1,54 @@
+{
+  "name": "smartcal",
+  "version": "1.0.0",
+  "description": "Voice interaction calendar tool",
+  "main": "main.js",
+  "electronMirror": "https://npmmirror.com/mirrors/electron/",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable",
+    "build:dir": "electron-builder --win portable --dir",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "config": {
+    "electron": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    }
+  },
+  "author": "WuYouke",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^38.8.6",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "build": {
+    "appId": "com.smartcal.app",
+    "productName": "SmartCal",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "assets/icon.png"
+    },
+    "portable": {
+      "artifactName": "SmartCal.exe"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "libs/",
+        "to": "libs/"
+      }
+    ]
+  }
+}
