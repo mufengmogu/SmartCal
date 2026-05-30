@@ -38,11 +38,6 @@ const SettingsManager = {
     const overlay = document.getElementById('settings-overlay');
     overlay.classList.remove('hidden');
 
-    if (this.config.iflytek) {
-      document.getElementById('iflytek-appid').value = this.config.iflytek.appId || '';
-      document.getElementById('iflytek-apikey').value = this.config.iflytek.apiKey || '';
-      document.getElementById('iflytek-apisecret').value = this.config.iflytek.apiSecret || '';
-    }
     if (this.config.qwen) {
       document.getElementById('qwen-apikey').value = this.config.qwen.apiKey || '';
     }
@@ -53,18 +48,11 @@ const SettingsManager = {
   },
 
   async saveSettings() {
-    const iflytek = {
-      appId: document.getElementById('iflytek-appid').value.trim(),
-      apiKey: document.getElementById('iflytek-apikey').value.trim(),
-      apiSecret: document.getElementById('iflytek-apisecret').value.trim()
-    };
-
     const qwen = {
       apiKey: document.getElementById('qwen-apikey').value.trim()
     };
 
     const config = {};
-    if (iflytek.appId) config.iflytek = iflytek;
     if (qwen.apiKey) config.qwen = qwen;
 
     this.config = config;

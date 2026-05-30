@@ -47,6 +47,38 @@ const EventsManager = {
     Calendar.setEvents(this.events);
   },
 
+  async findEventByName(name) {
+    const event = await window.electronAPI.findEventByName(name);
+    return event;
+  },
+
+  async updateEventByName(oldName, newName, newDate) {
+    const result = await window.electronAPI.updateEventByName(oldName, newName, newDate);
+    if (result.success) {
+      this.events = await window.electronAPI.getEvents();
+      this.sortEvents();
+      this.render();
+      Calendar.setEvents(this.events);
+    }
+    return result;
+  },
+
+  async markEventCompletedByName(name) {
+    const event = await window.electronAPI.findEventByName(name);
+    if (event) {
+      const updated = await window.electronAPI.toggleEventStatus(event.id);
+      const target = this.events.find(e => e.id === event.id);
+      if (target) {
+        target.status = updated.status;
+      }
+      this.sortEvents();
+      this.render();
+      Calendar.setEvents(this.events);
+      return { success: true };
+    }
+    return { success: false, error: '未找到事件: ' + name };
+  },
+
   render() {
     const eventsList = document.getElementById('events-list');
     const noEvents = document.getElementById('no-events');

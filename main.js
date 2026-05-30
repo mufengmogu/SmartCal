@@ -1,10 +1,14 @@
-const { app, BrowserWindow, ipcMain, dialog, systemPreferences } = require('electron');
+process.stdout.setDefaultEncoding('utf-8');
+process.stderr.setDefaultEncoding('utf-8');
+
+const { app, BrowserWindow, ipcMain, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow = null;
 let qwenClient = null;
-let iflytekWakeup = null;
+let asrManager = null;
+let bailian = null;
 
 try {
   qwenClient = require('./src/qwen.js');
@@ -13,10 +17,21 @@ try {
 }
 
 try {
-  const IflytekWakeup = require('./src/iflytek.js');
-  iflytekWakeup = new IflytekWakeup();
+  const IFlytekASRManager = require('./src/iflytek-asr.js');
+  asrManager = new IFlytekASRManager();
+  asrManager.initialize().then(ok => {
+    if (ok) console.log('讯飞实时语音转写模块初始化成功');
+    else console.log('讯飞实时语音转写模块初始化失败，请检查密钥文件');
+  });
 } catch (e) {
-  console.log('科大讯飞模块加载失败，将使用浏览器内置语音识别');
+  console.log('讯飞 ASR 模块加载失败:', e.message);
+}
+
+try {
+  bailian = require('./src/bailian.js');
+  console.log('阿里云百炼模块加载成功');
+} catch (e) {
+  console.log('阿里云百炼模块加载失败:', e.message);
 }
 
 function createWindow() {
@@ -42,7 +57,12 @@ function createWindow() {
 
 app.whenReady().then(createWindow);
 
+ipcMain.on('renderer-log', (event, { level, msg }) => {
+  console.log(`[Renderer ${level}] ${msg}`);
+});
+
 app.on('window-all-closed', () => {
+  if (asrManager) asrManager.stop();
   app.quit();
 });
 
@@ -81,9 +101,7 @@ function writeEvents(events) {
   fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2), 'utf-8');
 }
 
-ipcMain.handle('get-events', () => {
-  return readEvents();
-});
+ipcMain.handle('get-events', () => readEvents());
 
 ipcMain.handle('add-event', (event, newEvent) => {
   const events = readEvents();
@@ -127,13 +145,8 @@ ipcMain.handle('update-event', (event, updatedEvent) => {
   return events[idx];
 });
 
-ipcMain.handle('window-minimize', () => {
-  mainWindow.minimize();
-});
-
-ipcMain.handle('window-close', () => {
-  app.quit();
-});
+ipcMain.handle('window-minimize', () => { mainWindow.minimize(); });
+ipcMain.handle('window-close', () => { app.quit(); });
 
 ipcMain.handle('check-mic-permission', async () => {
   if (process.platform !== 'win32') {
@@ -152,41 +165,49 @@ ipcMain.handle('request-mic-permission', async () => {
   }
 });
 
-ipcMain.handle('voice-iflytek-init', async (event, config) => {
-  if (!iflytekWakeup) {
-    return { success: false, error: '科大讯飞SDK不可用' };
+ipcMain.handle('voice-asr-start', async () => {
+  if (!asrManager) {
+    return { success: false, error: '讯飞 ASR 模块不可用' };
   }
   try {
-    const result = await iflytekWakeup.initialize(config);
-    return { success: result, fallback: iflytekWakeup.fallbackMode };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('voice-iflytek-start', async () => {
-  if (!iflytekWakeup) {
-    return { success: false, error: '科大讯飞SDK不可用' };
-  }
-  try {
-    const result = await iflytekWakeup.startWakeup((wakeupResult) => {
-      if (mainWindow) {
-        mainWindow.webContents.send('voice-wakeup-detected', wakeupResult);
+    asrManager.setResultCallback((result) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('voice-asr-result', result);
       }
     });
-    return { success: result };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('voice-iflytek-stop', async () => {
-  if (!iflytekWakeup) return { success: true };
-  try {
-    await iflytekWakeup.stopWakeup();
+    asrManager.setStatusCallback((status, msg) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('voice-asr-status', { status, msg });
+      }
+    });
+    await asrManager.connect();
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('voice-asr-stop', async () => {
+  if (!asrManager) return { success: true };
+  try {
+    asrManager.stop();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('voice-asr-reset', async () => {
+  if (asrManager) {
+    asrManager.resetSessionText();
+    return { success: true };
+  }
+  return { success: false, error: 'ASR模块未初始化' };
+});
+
+ipcMain.on('voice-asr-audio', (event, audioData) => {
+  if (asrManager && asrManager.isRunning) {
+    asrManager.feedAudio(audioData);
   }
 });
 
@@ -194,25 +215,37 @@ ipcMain.handle('voice-qwen-configure', async (event, config) => {
   return { success: true, available: !!qwenClient };
 });
 
-ipcMain.handle('voice-qwen-process-text', async (event, text) => {
-  const datePattern = /\(\((.+?)\)\)/g;
-  const namePattern = /\[\[(.+?)\]\]/g;
-
-  const dateMatches = [...text.matchAll(datePattern)];
-  const nameMatches = [...text.matchAll(namePattern)];
-
-  const results = [];
-  const maxLen = Math.max(dateMatches.length, nameMatches.length);
-
-  for (let i = 0; i < maxLen; i++) {
-    const dateStr = dateMatches[i] ? dateMatches[i][1].trim() : null;
-    const name = nameMatches[i] ? nameMatches[i][1].trim() : null;
-    if (dateStr && name) {
-      results.push({ date: dateStr, name });
-    }
+ipcMain.handle('voice-ai-process', async (event, { text }) => {
+  if (!bailian) {
+    return { success: false, error: '阿里云百炼模块未加载' };
   }
+  try {
+    const rawResponse = await bailian.callQwenModel(text);
+    const parsed = bailian.parseAiResponse(rawResponse);
+    console.log('[AI处理] 输入: "' + text + '" → 动作: ' + parsed.action);
+    return { success: true, ...parsed };
+  } catch (e) {
+    console.error('[AI处理] 失败:', e.message);
+    return { success: false, error: e.message };
+  }
+});
 
-  return { results, rawText: text };
+ipcMain.handle('find-event-by-name', (event, name) => {
+  const events = readEvents();
+  const match = events.find(e => e.name === name && e.status !== '已完成');
+  return match || null;
+});
+
+ipcMain.handle('update-event-by-name', (event, { oldName, newName, newDate }) => {
+  const events = readEvents();
+  const idx = events.findIndex(e => e.name === oldName && e.status !== '已完成');
+  if (idx === -1) {
+    return { success: false, error: '未找到事件: ' + oldName };
+  }
+  if (newName) events[idx].name = newName;
+  if (newDate) events[idx].date = newDate;
+  writeEvents(events);
+  return { success: true, event: events[idx] };
 });
 
 ipcMain.handle('voice-get-config-path', () => {
