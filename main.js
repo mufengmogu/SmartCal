@@ -8,6 +8,7 @@ const fs = require('fs');
 let mainWindow = null;
 let qwenClient = null;
 let asrManager = null;
+let bailian = null;
 
 try {
   qwenClient = require('./src/qwen.js');
@@ -24,6 +25,13 @@ try {
   });
 } catch (e) {
   console.log('讯飞 ASR 模块加载失败:', e.message);
+}
+
+try {
+  bailian = require('./src/bailian.js');
+  console.log('阿里云百炼模块加载成功');
+} catch (e) {
+  console.log('阿里云百炼模块加载失败:', e.message);
 }
 
 function createWindow() {
@@ -207,25 +215,37 @@ ipcMain.handle('voice-qwen-configure', async (event, config) => {
   return { success: true, available: !!qwenClient };
 });
 
-ipcMain.handle('voice-qwen-process-text', async (event, text) => {
-  const datePattern = /\(\((.+?)\)\)/g;
-  const namePattern = /\[\[(.+?)\]\]/g;
-
-  const dateMatches = [...text.matchAll(datePattern)];
-  const nameMatches = [...text.matchAll(namePattern)];
-
-  const results = [];
-  const maxLen = Math.max(dateMatches.length, nameMatches.length);
-
-  for (let i = 0; i < maxLen; i++) {
-    const dateStr = dateMatches[i] ? dateMatches[i][1].trim() : null;
-    const name = nameMatches[i] ? nameMatches[i][1].trim() : null;
-    if (dateStr && name) {
-      results.push({ date: dateStr, name });
-    }
+ipcMain.handle('voice-ai-process', async (event, { text }) => {
+  if (!bailian) {
+    return { success: false, error: '阿里云百炼模块未加载' };
   }
+  try {
+    const rawResponse = await bailian.callQwenModel(text);
+    const parsed = bailian.parseAiResponse(rawResponse);
+    console.log('[AI处理] 输入: "' + text + '" → 动作: ' + parsed.action);
+    return { success: true, ...parsed };
+  } catch (e) {
+    console.error('[AI处理] 失败:', e.message);
+    return { success: false, error: e.message };
+  }
+});
 
-  return { results, rawText: text };
+ipcMain.handle('find-event-by-name', (event, name) => {
+  const events = readEvents();
+  const match = events.find(e => e.name === name && e.status !== '已完成');
+  return match || null;
+});
+
+ipcMain.handle('update-event-by-name', (event, { oldName, newName, newDate }) => {
+  const events = readEvents();
+  const idx = events.findIndex(e => e.name === oldName && e.status !== '已完成');
+  if (idx === -1) {
+    return { success: false, error: '未找到事件: ' + oldName };
+  }
+  if (newName) events[idx].name = newName;
+  if (newDate) events[idx].date = newDate;
+  writeEvents(events);
+  return { success: true, event: events[idx] };
 });
 
 ipcMain.handle('voice-get-config-path', () => {

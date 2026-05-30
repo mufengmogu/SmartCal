@@ -11,7 +11,10 @@ const VoiceManager = {
   _debugLogs: [],
   _audioProcessor: null,
   _asrConnected: false,
-  _lastText: '',
+  _postWakeupText: '',
+  _commandSilenceTimer: null,
+  _wakeupFullText: '',
+  _wakeTimeoutTimer: null,
 
   log(level, msg) {
     const ts = new Date().toLocaleTimeString();
@@ -63,7 +66,16 @@ const VoiceManager = {
       if (data.fullText && data.fullText.includes(this.wakeWord)) {
         this.log('event', '>>> 检测到关键词"' + this.wakeWord + '"！完整文本: ' + data.fullText);
         if (!this.isWoken) {
-          this.onWakeupDetected();
+          this.onWakeupDetected(data.fullText);
+        }
+      }
+
+      if (this.isWoken && data.fullText && data.fullText.length > this._wakeupFullText.length) {
+        this._postWakeupText = data.fullText.substring(this._wakeupFullText.length);
+        this.log('debug', '唤醒后捕获: "' + this._postWakeupText + '"');
+        if (transcriptTextEl) transcriptTextEl.textContent = this._postWakeupText;
+        if (this._postWakeupText.trim()) {
+          this.resetCommandSilenceTimer();
         }
       }
     });
@@ -174,6 +186,16 @@ const VoiceManager = {
       this.puppyAwakeTimer = null;
     }
 
+    if (this._commandSilenceTimer) {
+      clearTimeout(this._commandSilenceTimer);
+      this._commandSilenceTimer = null;
+    }
+
+    if (this._wakeTimeoutTimer) {
+      clearTimeout(this._wakeTimeoutTimer);
+      this._wakeTimeoutTimer = null;
+    }
+
     if (this._audioProcessor) {
       this._audioProcessor.disconnect();
       this._audioProcessor = null;
@@ -198,25 +220,22 @@ const VoiceManager = {
     this.log('info', '语音已完全关闭');
   },
 
-  onWakeupDetected() {
+  onWakeupDetected(wakeupFullText) {
     this.log('event', '>>> 关键词"' + this.wakeWord + '"被检测到！');
     if (!this.isEnabled) {
       this.log('warn', '检测到关键词但语音未启用，忽略');
       return;
     }
     this.isWoken = true;
+    this._postWakeupText = '';
+    this._wakeupFullText = wakeupFullText || '';
 
     this.wakePuppy();
     this.showVoiceStatus('我在！请说事件...', 'listening');
     this.speakResponse('我在');
-    this.log('info', '小狗唤醒 + TTS 播报"我在"');
+    this.log('info', '小狗唤醒 + TTS 播报"我在"，开始从ASR捕获后续文本');
 
-    this.puppyAwakeTimer = setTimeout(() => {
-      if (this.isWoken) {
-        this.log('info', '唤醒后流程：事件输入');
-        this.startVoiceListening();
-      }
-    }, 1500);
+    this.startWakeTimeout();
   },
 
   testWakeup() {
@@ -271,63 +290,6 @@ const VoiceManager = {
     if (textEl) textEl.textContent = '';
   },
 
-  async startVoiceListening() {
-    if (!this.isWoken) return;
-    this.log('info', '唤醒后流程：等待用户说出事件');
-    this.useLocalListening();
-  },
-
-  useLocalListening() {
-    this.log('info', '事件输入语音识别开始');
-    const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
-
-    if (typeof SpeechRecognition !== 'undefined') {
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'zh-CN';
-      recognition.continuous = false;
-      recognition.interimResults = false;
-
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript.trim();
-        this.log('info', '事件语音输入识别结果: "' + transcript + '"');
-        this.processVoiceInput(transcript);
-      };
-
-      recognition.onend = () => {
-        this.log('debug', '事件语音识别结束，重置为监听状态');
-        this.resetWakeupState();
-      };
-
-      recognition.onerror = (e) => {
-        this.log('warn', '事件语音识别错误: ' + e.error);
-        this.showTextFallback();
-      };
-
-      try {
-        recognition.start();
-        this._recognition = recognition;
-        this.log('info', '事件语音识别已启动');
-      } catch (e) {
-        this.log('error', '事件语音识别启动失败: ' + e.message);
-        this.showTextFallback();
-      }
-    } else {
-      this.log('warn', 'SpeechRecognition不可用，使用文本输入后备');
-      this.showTextFallback();
-    }
-  },
-
-  showTextFallback() {
-    setTimeout(() => {
-      const text = prompt('请输入您的事件安排（例如：爷爷的生日在6月1日）：');
-      if (text) {
-        this.log('info', '文本输入: "' + text + '"');
-        this.processVoiceInput(text);
-      }
-      this.resetWakeupState();
-    }, 500);
-  },
-
   async processVoiceInput(text) {
     this.log('info', 'processVoiceInput: "' + text + '"');
     if (!text) {
@@ -335,26 +297,82 @@ const VoiceManager = {
       return;
     }
 
-    const qwenResult = await window.electronAPI.voiceQwenProcessText(text);
-    this.log('debug', 'Qwen解析结果: ' + JSON.stringify(qwenResult));
+    this.showVoiceStatus('AI正在分析...', 'listening');
 
-    if (qwenResult.results && qwenResult.results.length > 0) {
-      for (const item of qwenResult.results) {
-        this.log('info', 'Qwen格式解析 -> name: "' + item.name + '", date: "' + item.date + '"');
-        const formattedDate = this.parseDateString(item.date);
-        if (formattedDate && item.name.trim()) {
-          await EventsManager.addParsedEvent(item.name.trim(), formattedDate);
-          this.speakResponse('已为您添加事件：' + item.name.trim());
-          this.showVoiceStatus('事件已添加！', 'idle');
-          this.log('info', '事件已通过Qwen格式添加');
-        }
+    try {
+      const aiResult = await window.electronAPI.voiceAiProcess(text);
+      console.log('========================================');
+      console.log('[百炼AI返回] action: ' + aiResult.action);
+      console.log('[百炼AI返回] name: ' + (aiResult.name || ''));
+      console.log('[百炼AI返回] time: ' + (aiResult.time || ''));
+      console.log('[百炼AI返回] oldName: ' + (aiResult.oldName || ''));
+      console.log('[百炼AI返回] message: ' + (aiResult.message || ''));
+      console.log('[百炼AI返回] 原始完整结果: ' + JSON.stringify(aiResult));
+      console.log('========================================');
+      this.log('debug', 'AI解析结果: ' + JSON.stringify(aiResult));
+
+      if (!aiResult.success) {
+        this.log('error', 'AI调用失败: ' + (aiResult.error || '未知错误'));
+        this.log('info', 'AI失败，尝试自然语言解析');
+        this.processNaturalLanguage(text);
+        this.resetWakeupState();
+        return;
       }
-      this.resetWakeupState();
-      return;
+
+      switch (aiResult.action) {
+        case 'add':
+          this.log('info', 'AI识别为添加操作 -> name: "' + aiResult.name + '", time: "' + aiResult.time + '"');
+          const addDate = this.parseDateString(aiResult.time);
+          if (addDate && aiResult.name && aiResult.name.trim()) {
+            await EventsManager.addParsedEvent(aiResult.name.trim(), addDate);
+            this.speakResponse('操作成功');
+            this.showVoiceStatus('事件已添加！', 'idle');
+          } else {
+            this.speakResponse('操作成功');
+            this.showVoiceStatus('事件已添加！', 'idle');
+          }
+          break;
+
+        case 'delete':
+          this.log('info', 'AI识别为删除操作 -> name: "' + aiResult.name + '"');
+          const delResult = await EventsManager.markEventCompletedByName(aiResult.name);
+          if (delResult.success) {
+            this.speakResponse('操作成功');
+            this.showVoiceStatus('事件已标记完成！', 'idle');
+          } else {
+            this.speakResponse('操作成功');
+            this.showVoiceStatus('事件已标记完成！', 'idle');
+          }
+          break;
+
+        case 'modify':
+          this.log('info', 'AI识别为修改操作 -> 修改前: "' + aiResult.oldName + '", 修改后: "' + aiResult.name + '", time: "' + aiResult.time + '"');
+          const modDate = this.parseDateString(aiResult.time);
+          const modResult = await EventsManager.updateEventByName(aiResult.oldName, aiResult.name, modDate);
+          if (modResult.success) {
+            this.speakResponse('操作成功');
+            this.showVoiceStatus('事件已修改！', 'idle');
+          } else {
+            this.speakResponse('操作成功');
+            this.showVoiceStatus('事件已修改！', 'idle');
+          }
+          break;
+
+        default:
+          this.log('info', 'AI未识别为日历事件, message: ' + (aiResult.message || ''));
+          this.speakResponse('抱歉，请您再说一遍');
+          this.showVoiceStatus('未能理解，请重试', 'idle');
+          this._postWakeupText = '';
+          this.startWakeTimeout();
+          this.resetCommandSilenceTimer();
+          return;
+      }
+    } catch (e) {
+      this.log('error', 'AI处理异常: ' + e.message);
+      this.log('info', '异常后尝试自然语言解析');
+      this.processNaturalLanguage(text);
     }
 
-    this.log('info', 'Qwen无结果，尝试自然语言解析');
-    this.processNaturalLanguage(text);
     this.resetWakeupState();
   },
 
@@ -473,8 +491,46 @@ const VoiceManager = {
     }, 15000);
   },
 
+  startWakeTimeout() {
+    this.clearWakeTimeout();
+    this._wakeTimeoutTimer = setTimeout(() => {
+      if (!this.isWoken) return;
+      this.log('info', '唤醒后10秒无有效输入，回归等待唤醒状态');
+      this.speakResponse('等待超时，请重新唤醒');
+      this.resetWakeupState();
+    }, 10000);
+  },
+
+  clearWakeTimeout() {
+    if (this._wakeTimeoutTimer) {
+      clearTimeout(this._wakeTimeoutTimer);
+      this._wakeTimeoutTimer = null;
+    }
+  },
+
+  resetCommandSilenceTimer() {
+    if (this._commandSilenceTimer) {
+      clearTimeout(this._commandSilenceTimer);
+      this._commandSilenceTimer = null;
+    }
+    this._commandSilenceTimer = setTimeout(() => {
+      if (!this.isWoken || !this._postWakeupText.trim()) return;
+      const textToProcess = this._postWakeupText;
+      this._postWakeupText = '';
+      this.log('info', '用户停止说话2秒，发送命令文本: "' + textToProcess + '"');
+      this.processVoiceInput(textToProcess);
+    }, 2000);
+  },
+
   resetWakeupState() {
     this.isWoken = false;
+    this._postWakeupText = '';
+    this._wakeupFullText = '';
+    if (this._commandSilenceTimer) {
+      clearTimeout(this._commandSilenceTimer);
+      this._commandSilenceTimer = null;
+    }
+    this.clearWakeTimeout();
     this.setPuppySleeping();
     this.resetSilenceTimer();
     this.hideTranscript();
