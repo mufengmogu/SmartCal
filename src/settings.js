@@ -32,16 +32,19 @@ const SettingsManager = {
     document.getElementById('link-qwen-doc').addEventListener('click', (e) => {
       e.preventDefault();
     });
+
+    document.getElementById('link-snowboy-train').addEventListener('click', (e) => {
+      e.preventDefault();
+    });
   },
 
   showSettings() {
     const overlay = document.getElementById('settings-overlay');
     overlay.classList.remove('hidden');
 
-    if (this.config.iflytek) {
-      document.getElementById('iflytek-appid').value = this.config.iflytek.appId || '';
-      document.getElementById('iflytek-apikey').value = this.config.iflytek.apiKey || '';
-      document.getElementById('iflytek-apisecret').value = this.config.iflytek.apiSecret || '';
+    if (this.config.snowboy) {
+      document.getElementById('snowboy-model').value = this.config.snowboy.modelPath || '';
+      document.getElementById('snowboy-sensitivity').value = this.config.snowboy.sensitivity || '0.5';
     }
     if (this.config.qwen) {
       document.getElementById('qwen-apikey').value = this.config.qwen.apiKey || '';
@@ -53,10 +56,9 @@ const SettingsManager = {
   },
 
   async saveSettings() {
-    const iflytek = {
-      appId: document.getElementById('iflytek-appid').value.trim(),
-      apiKey: document.getElementById('iflytek-apikey').value.trim(),
-      apiSecret: document.getElementById('iflytek-apisecret').value.trim()
+    const snowboy = {
+      modelPath: document.getElementById('snowboy-model').value.trim(),
+      sensitivity: document.getElementById('snowboy-sensitivity').value.trim() || '0.5'
     };
 
     const qwen = {
@@ -64,7 +66,7 @@ const SettingsManager = {
     };
 
     const config = {};
-    if (iflytek.appId) config.iflytek = iflytek;
+    if (snowboy.modelPath || snowboy.sensitivity !== '0.5') config.snowboy = snowboy;
     if (qwen.apiKey) config.qwen = qwen;
 
     this.config = config;

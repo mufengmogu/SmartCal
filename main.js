@@ -1,10 +1,10 @@
-const { app, BrowserWindow, ipcMain, dialog, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow = null;
 let qwenClient = null;
-let iflytekWakeup = null;
+let snowboyManager = null;
 
 try {
   qwenClient = require('./src/qwen.js');
@@ -13,10 +13,10 @@ try {
 }
 
 try {
-  const IflytekWakeup = require('./src/iflytek.js');
-  iflytekWakeup = new IflytekWakeup();
+  const SnowboyManager = require('./src/snowboy.js');
+  snowboyManager = new SnowboyManager();
 } catch (e) {
-  console.log('科大讯飞模块加载失败，将使用浏览器内置语音识别');
+  console.log('Snowboy 模块加载失败:', e.message);
 }
 
 function createWindow() {
@@ -41,6 +41,10 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
+
+ipcMain.on('renderer-log', (event, { level, msg }) => {
+  console.log(`[Renderer ${level}] ${msg}`);
+});
 
 app.on('window-all-closed', () => {
   app.quit();
@@ -152,24 +156,24 @@ ipcMain.handle('request-mic-permission', async () => {
   }
 });
 
-ipcMain.handle('voice-iflytek-init', async (event, config) => {
-  if (!iflytekWakeup) {
-    return { success: false, error: '科大讯飞SDK不可用' };
+ipcMain.handle('voice-snowboy-init', async (event, config) => {
+  if (!snowboyManager) {
+    return { success: false, error: 'Snowboy 模块不可用' };
   }
   try {
-    const result = await iflytekWakeup.initialize(config);
-    return { success: result, fallback: iflytekWakeup.fallbackMode };
+    const result = await snowboyManager.initialize(config || {});
+    return { success: true, fallback: result.fallback };
   } catch (e) {
-    return { success: false, error: e.message };
+    return { success: false, error: e.message, fallback: true };
   }
 });
 
-ipcMain.handle('voice-iflytek-start', async () => {
-  if (!iflytekWakeup) {
-    return { success: false, error: '科大讯飞SDK不可用' };
+ipcMain.handle('voice-snowboy-start', async () => {
+  if (!snowboyManager) {
+    return { success: false, error: 'Snowboy 模块不可用' };
   }
   try {
-    const result = await iflytekWakeup.startWakeup((wakeupResult) => {
+    const result = await snowboyManager.startWakeup((wakeupResult) => {
       if (mainWindow) {
         mainWindow.webContents.send('voice-wakeup-detected', wakeupResult);
       }
@@ -180,10 +184,10 @@ ipcMain.handle('voice-iflytek-start', async () => {
   }
 });
 
-ipcMain.handle('voice-iflytek-stop', async () => {
-  if (!iflytekWakeup) return { success: true };
+ipcMain.handle('voice-snowboy-stop', async () => {
+  if (!snowboyManager) return { success: true };
   try {
-    await iflytekWakeup.stopWakeup();
+    await snowboyManager.stopWakeup();
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
