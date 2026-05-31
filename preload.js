@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   voiceAsrStart: () => ipcRenderer.invoke('voice-asr-start'),
   voiceAsrStop: () => ipcRenderer.invoke('voice-asr-stop'),
   voiceAsrReset: () => ipcRenderer.invoke('voice-asr-reset'),
+  voiceAsrBlockAudio: () => ipcRenderer.invoke('voice-asr-block-audio'),
+  voiceAsrUnblockAudio: () => ipcRenderer.invoke('voice-asr-unblock-audio'),
   voiceAsrSendAudio: (audioData) => ipcRenderer.send('voice-asr-audio', audioData),
 
   voiceQwenConfigure: (config) => ipcRenderer.invoke('voice-qwen-configure', config),

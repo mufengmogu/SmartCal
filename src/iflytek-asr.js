@@ -60,6 +60,7 @@ class IFlytekASRManager {
     this._statusCallback = null;
     this.sessionId = '';
     this._audioRemainder = Buffer.alloc(0);
+    this._audioBlocked = false;
   }
 
   async initialize() {
@@ -169,7 +170,7 @@ class IFlytekASRManager {
       try {
         const result = this._extractText(msg.data);
         if (result) {
-          this.currentSessionText += result.text;
+          this.currentSessionText = result.text;
           console.log('[iFlytekASR] 转写: "' + result.text + '" (type=' + result.type + ')');
           if (this._resultCallback) {
             this._resultCallback({
@@ -244,6 +245,10 @@ class IFlytekASRManager {
       return;
     }
 
+    if (this._audioBlocked) {
+      return;
+    }
+
     let buf = Buffer.concat([this._audioRemainder, Buffer.from(pcmBuffer)]);
 
     while (buf.length >= 1280) {
@@ -302,6 +307,18 @@ class IFlytekASRManager {
 
   resetSessionText() {
     this.currentSessionText = '';
+  }
+
+  blockAudio() {
+    this._audioBlocked = true;
+    this._audioQueue = [];
+    this._audioRemainder = Buffer.alloc(0);
+    console.log('[iFlytekASR] 音频输入已阻塞，队列已清空');
+  }
+
+  unblockAudio() {
+    this._audioBlocked = false;
+    console.log('[iFlytekASR] 音频输入已恢复');
   }
 }
 

@@ -15,6 +15,9 @@ const VoiceManager = {
   _wakeupFullText: '',
   _awakenedSilenceTimer: null,
   _analysisTimeoutTimer: null,
+  _captureDelayedUntil: 0,
+  _captureDelayTimer: null,
+  _audioBlocked: false,
 
   log(level, msg) {
     const ts = new Date().toLocaleTimeString();
@@ -72,6 +75,9 @@ const VoiceManager = {
       }
 
       if (this.isWoken && data.fullText && data.fullText.length > this._wakeupFullText.length) {
+        if (Date.now() < this._captureDelayedUntil) {
+          return;
+        }
         this._postWakeupText = data.fullText.substring(this._wakeupFullText.length);
         this.log('debug', '唤醒后捕获: "' + this._postWakeupText + '"');
         if (transcriptTextEl) transcriptTextEl.textContent = this._postWakeupText;
@@ -152,7 +158,7 @@ const VoiceManager = {
     this._audioProcessor = processor;
 
     processor.onaudioprocess = (event) => {
-      if (!this.isEnabled || this.isAnalyzing) return;
+      if (!this.isEnabled || this.isAnalyzing || this._audioBlocked) return;
 
       const input = event.inputBuffer.getChannelData(0);
       const pcmBuffer = this.float32ToInt16(input);
@@ -187,6 +193,9 @@ const VoiceManager = {
     this.clearCommandSilenceTimer();
     this.clearAwakenedSilenceTimer();
     this.clearAnalysisTimeout();
+    this.clearCaptureDelayTimer();
+    this._audioBlocked = false;
+    window.electronAPI.voiceAsrUnblockAudio();
 
     if (this._audioProcessor) {
       this._audioProcessor.disconnect();
@@ -221,10 +230,24 @@ const VoiceManager = {
     this._postWakeupText = '';
     this._wakeupFullText = wakeupFullText || '';
 
+    this._audioBlocked = true;
+    window.electronAPI.voiceAsrBlockAudio();
+
     this.wakePuppy();
     this.showVoiceStatus('我在！请说事件...', 'listening');
     this.speakResponse('我在');
-    this.log('info', '小狗唤醒 + TTS 播报"我在"，开始从ASR捕获后续文本');
+    this.log('info', '小狗唤醒 + TTS 播报"我在"，1.5秒后开始捕获用户语音');
+
+    this._captureDelayedUntil = Date.now() + 1500;
+    this.clearCaptureDelayTimer();
+    this._captureDelayTimer = setTimeout(async () => {
+      await window.electronAPI.voiceAsrReset();
+      this._wakeupFullText = '';
+      this._postWakeupText = '';
+      this._audioBlocked = false;
+      await window.electronAPI.voiceAsrUnblockAudio();
+      this.log('info', '1.5秒延迟结束，开始捕获用户语音');
+    }, 1500);
 
     this.startAwakenedSilenceTimer();
   },
@@ -310,6 +333,9 @@ const VoiceManager = {
         return;
       }
 
+      this._audioBlocked = true;
+      window.electronAPI.voiceAsrBlockAudio();
+
       if (!aiResult.success) {
         this.log('error', 'AI调用失败: ' + (aiResult.error || '未知错误'));
         this.speakResponse('抱歉，请您再说一遍');
@@ -347,6 +373,8 @@ const VoiceManager = {
       }
     } catch (e) {
       this.log('error', 'AI处理异常: ' + e.message);
+      this._audioBlocked = true;
+      window.electronAPI.voiceAsrBlockAudio();
       this.speakResponse('抱歉，请您再说一遍');
     }
 
@@ -479,6 +507,8 @@ const VoiceManager = {
     this._analysisTimeoutTimer = setTimeout(() => {
       if (!this.isAnalyzing) return;
       this.log('info', 'AI分析30秒超时，返回已唤醒状态');
+      this._audioBlocked = true;
+      window.electronAPI.voiceAsrBlockAudio();
       this.speakResponse('抱歉，请您再说一遍');
       this.returnToAwakenedState();
     }, 30000);
@@ -495,6 +525,13 @@ const VoiceManager = {
     if (this._commandSilenceTimer) {
       clearTimeout(this._commandSilenceTimer);
       this._commandSilenceTimer = null;
+    }
+  },
+
+  clearCaptureDelayTimer() {
+    if (this._captureDelayTimer) {
+      clearTimeout(this._captureDelayTimer);
+      this._captureDelayTimer = null;
     }
   },
 
@@ -524,8 +561,20 @@ const VoiceManager = {
     this.clearCommandSilenceTimer();
     this.clearAnalysisTimeout();
     this.clearAwakenedSilenceTimer();
+
+    this._captureDelayedUntil = Date.now() + 1500;
+    this.clearCaptureDelayTimer();
+    this._captureDelayTimer = setTimeout(async () => {
+      await window.electronAPI.voiceAsrReset();
+      this._wakeupFullText = '';
+      this._postWakeupText = '';
+      this._audioBlocked = false;
+      await window.electronAPI.voiceAsrUnblockAudio();
+      this.log('info', '1.5秒延迟结束，开始捕获用户语音');
+    }, 1500);
+
     this._isReturningToAwakened = false;
-    this.log('info', '返回已唤醒状态，继续等待用户说话');
+    this.log('info', '返回已唤醒状态，1.5秒后开始捕获用户语音');
     this.showVoiceStatus('我在！请说事件...', 'listening');
     this.startAwakenedSilenceTimer();
   },
@@ -538,9 +587,12 @@ const VoiceManager = {
     this.clearCommandSilenceTimer();
     this.clearAwakenedSilenceTimer();
     this.clearAnalysisTimeout();
+    this.clearCaptureDelayTimer();
+    this._audioBlocked = false;
     this.setPuppySleeping();
     this.hideTranscript();
     window.electronAPI.voiceAsrReset();
+    window.electronAPI.voiceAsrUnblockAudio();
     this.log('info', '回归唤醒等待状态，继续监听关键词');
   }
 };
