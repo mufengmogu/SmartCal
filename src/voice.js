@@ -18,6 +18,8 @@ const VoiceManager = {
   _captureDelayedUntil: 0,
   _captureDelayTimer: null,
   _audioBlocked: false,
+  _isReturningToAwakened: false,
+  _chatBubbleTimer: null,
 
   log(level, msg) {
     const ts = new Date().toLocaleTimeString();
@@ -60,13 +62,6 @@ const VoiceManager = {
         console.log('[ASR转写] ' + data.text + (data.isFinal ? ' [最终]' : ''));
       }
 
-      const transcriptEl = document.getElementById('asr-transcript');
-      const transcriptTextEl = document.getElementById('asr-transcript-text');
-      if (transcriptEl && transcriptTextEl && data.fullText) {
-        transcriptEl.classList.remove('hidden');
-        transcriptTextEl.textContent = data.fullText;
-      }
-
       if (data.fullText && data.fullText.includes(this.wakeWord)) {
         this.log('event', '>>> 检测到关键词"' + this.wakeWord + '"！完整文本: ' + data.fullText);
         if (!this.isWoken) {
@@ -80,7 +75,12 @@ const VoiceManager = {
         }
         this._postWakeupText = data.fullText.substring(this._wakeupFullText.length);
         this.log('debug', '唤醒后捕获: "' + this._postWakeupText + '"');
-        if (transcriptTextEl) transcriptTextEl.textContent = this._postWakeupText;
+        const transcriptEl = document.getElementById('asr-transcript');
+        const transcriptTextEl = document.getElementById('asr-transcript-text');
+        if (transcriptEl && transcriptTextEl && this._postWakeupText.trim()) {
+          transcriptEl.classList.remove('hidden');
+          transcriptTextEl.textContent = this._postWakeupText;
+        }
         if (this._postWakeupText.trim()) {
           this.resetCommandSilenceTimer();
         }
@@ -217,6 +217,7 @@ const VoiceManager = {
     this.detectionMethod = 'none';
     this.hideVoiceStatus();
     this.hideTranscript();
+    this.hideChatBubble();
     this.log('info', '语音已完全关闭');
   },
 
@@ -235,6 +236,7 @@ const VoiceManager = {
 
     this.wakePuppy();
     this.showVoiceStatus('我在！请说事件...', 'listening');
+    this.showChatBubble('我在');
     this.speakResponse('我在');
     this.log('info', '小狗唤醒 + TTS 播报"我在"，1.5秒后开始捕获用户语音');
 
@@ -263,19 +265,41 @@ const VoiceManager = {
   },
 
   setPuppySleeping() {
-    const puppy = document.getElementById('puppy-container');
-    if (puppy) {
-      puppy.classList.remove('awake');
-      puppy.classList.add('sleeping');
-    }
+    this.setCharacterState('sleeping');
   },
 
   wakePuppy() {
-    const puppy = document.getElementById('puppy-container');
-    if (puppy) {
-      puppy.classList.remove('sleeping');
-      puppy.classList.add('awake');
+    this.setCharacterState('awake');
+  },
+
+  setCharacterState(state) {
+    const gif = document.getElementById('character-gif');
+    if (!gif) return;
+    switch (state) {
+      case 'sleeping':
+        gif.src = '../assets/唤醒等待.gif';
+        break;
+      case 'awake':
+        gif.src = '../assets/已唤醒.gif';
+        break;
+      case 'analyzing':
+        gif.src = '../assets/分析.gif';
+        break;
     }
+  },
+
+  showChatBubble(text) {
+    const bubble = document.getElementById('chat-bubble');
+    const bubbleText = document.getElementById('chat-bubble-text');
+    if (!bubble || !bubbleText) return;
+    bubbleText.textContent = text;
+    bubble.classList.remove('hidden');
+    if (this._chatBubbleTimer) {
+      clearTimeout(this._chatBubbleTimer);
+    }
+    this._chatBubbleTimer = setTimeout(() => {
+      bubble.classList.add('hidden');
+    }, 4000);
   },
 
   showVoiceStatus(text, state) {
@@ -305,19 +329,28 @@ const VoiceManager = {
   },
 
   async processVoiceInput(text) {
-    this.log('info', '进入分析状态: "' + text + '"');
-    if (!text) {
+    const cleanedText = text.replace(/^[^\u4e00-\u9fff\w]+/u, '').trim();
+    this.log('info', '进入分析状态: "' + text + '" -> 清理后: "' + cleanedText + '"');
+    if (!cleanedText) {
       await this.returnToAwakenedState();
       return;
     }
 
+    const transcriptEl = document.getElementById('asr-transcript');
+    const transcriptTextEl = document.getElementById('asr-transcript-text');
+    if (transcriptEl && transcriptTextEl) {
+      transcriptEl.classList.remove('hidden');
+      transcriptTextEl.textContent = cleanedText;
+    }
+
     this.isAnalyzing = true;
+    this.setCharacterState('analyzing');
     this.clearAwakenedSilenceTimer();
     this.startAnalysisTimeout();
     this.showVoiceStatus('AI正在分析...', 'listening');
 
     try {
-      const aiResult = await window.electronAPI.voiceAiProcess(text);
+      const aiResult = await window.electronAPI.voiceAiProcess(cleanedText);
       console.log('========================================');
       console.log('[百炼AI返回] action: ' + aiResult.action);
       console.log('[百炼AI返回] name: ' + (aiResult.name || ''));
@@ -338,6 +371,7 @@ const VoiceManager = {
 
       if (!aiResult.success) {
         this.log('error', 'AI调用失败: ' + (aiResult.error || '未知错误'));
+        this.showChatBubble('抱歉，请您再说一遍');
         this.speakResponse('抱歉，请您再说一遍');
         await this.returnToAwakenedState();
         return;
@@ -350,12 +384,14 @@ const VoiceManager = {
           if (addDate && aiResult.name && aiResult.name.trim()) {
             await EventsManager.addParsedEvent(aiResult.name.trim(), addDate);
           }
+          this.showChatBubble('操作成功');
           this.speakResponse('操作成功');
           break;
 
         case 'delete':
           this.log('info', 'AI识别为删除操作 -> name: "' + aiResult.name + '"');
           await EventsManager.markEventCompletedByName(aiResult.name);
+          this.showChatBubble('操作成功');
           this.speakResponse('操作成功');
           break;
 
@@ -363,16 +399,19 @@ const VoiceManager = {
           this.log('info', 'AI识别为修改操作 -> 修改前: "' + aiResult.oldName + '", 修改后: "' + aiResult.name + '", time: "' + aiResult.time + '"');
           const modDate = this.parseDateString(aiResult.time);
           await EventsManager.updateEventByName(aiResult.oldName, aiResult.name, modDate);
+          this.showChatBubble('操作成功');
           this.speakResponse('操作成功');
           break;
 
         default:
           this.log('info', 'AI未识别为日历事件, message: ' + (aiResult.message || ''));
+          this.showChatBubble('抱歉，请您再说一遍');
           this.speakResponse('抱歉，请您再说一遍');
           break;
       }
     } catch (e) {
       this.log('error', 'AI处理异常: ' + e.message);
+      this.showChatBubble('抱歉，请您再说一遍');
       this._audioBlocked = true;
       window.electronAPI.voiceAsrBlockAudio();
       this.speakResponse('抱歉，请您再说一遍');
@@ -553,8 +592,6 @@ const VoiceManager = {
     if (this._isReturningToAwakened) return;
     this._isReturningToAwakened = true;
 
-    await window.electronAPI.voiceAsrReset();
-
     this.isAnalyzing = false;
     this._postWakeupText = '';
     this._wakeupFullText = '';
@@ -570,16 +607,18 @@ const VoiceManager = {
       this._postWakeupText = '';
       this._audioBlocked = false;
       await window.electronAPI.voiceAsrUnblockAudio();
+      this._isReturningToAwakened = false;
       this.log('info', '1.5秒延迟结束，开始捕获用户语音');
     }, 1500);
 
-    this._isReturningToAwakened = false;
     this.log('info', '返回已唤醒状态，1.5秒后开始捕获用户语音');
+    this.setCharacterState('awake');
     this.showVoiceStatus('我在！请说事件...', 'listening');
     this.startAwakenedSilenceTimer();
   },
 
   resetWakeupState() {
+    this._isReturningToAwakened = false;
     this.isWoken = false;
     this.isAnalyzing = false;
     this._postWakeupText = '';
@@ -589,10 +628,21 @@ const VoiceManager = {
     this.clearAnalysisTimeout();
     this.clearCaptureDelayTimer();
     this._audioBlocked = false;
-    this.setPuppySleeping();
+    this.setCharacterState('sleeping');
     this.hideTranscript();
+    this.hideChatBubble();
     window.electronAPI.voiceAsrReset();
     window.electronAPI.voiceAsrUnblockAudio();
+    this.showVoiceStatus('等待关键词..."' + this.wakeWord + '"', 'idle');
     this.log('info', '回归唤醒等待状态，继续监听关键词');
+  },
+
+  hideChatBubble() {
+    const bubble = document.getElementById('chat-bubble');
+    if (bubble) bubble.classList.add('hidden');
+    if (this._chatBubbleTimer) {
+      clearTimeout(this._chatBubbleTimer);
+      this._chatBubbleTimer = null;
+    }
   }
 };

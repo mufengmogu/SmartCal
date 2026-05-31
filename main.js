@@ -37,12 +37,12 @@ try {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 500,
-    height: 730,
+    height: 850,
     resizable: false,
     frame: false,
     transparent: false,
     alwaysOnTop: false,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#f5f6fa',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

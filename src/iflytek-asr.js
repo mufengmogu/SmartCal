@@ -54,6 +54,7 @@ class IFlytekASRManager {
     this.isRunning = false;
     this.keys = null;
     this.currentSessionText = '';
+    this._baseSessionText = '';
     this._audioQueue = [];
     this._sendTimer = null;
     this._resultCallback = null;
@@ -111,6 +112,7 @@ class IFlytekASRManager {
       const ws = new WebSocket(url);
       this.ws = ws;
       this.currentSessionText = '';
+      this._baseSessionText = '';
       this._audioRemainder = Buffer.alloc(0);
 
       ws.on('open', () => {
@@ -170,7 +172,10 @@ class IFlytekASRManager {
       try {
         const result = this._extractText(msg.data);
         if (result) {
-          this.currentSessionText = result.text;
+          if (result.type === '0') {
+            this._baseSessionText += result.text;
+          }
+          this.currentSessionText = this._baseSessionText + (result.type === '0' ? '' : result.text);
           console.log('[iFlytekASR] 转写: "' + result.text + '" (type=' + result.type + ')');
           if (this._resultCallback) {
             this._resultCallback({
@@ -298,6 +303,7 @@ class IFlytekASRManager {
     }
     this.ws = null;
     this.currentSessionText = '';
+    this._baseSessionText = '';
     this.sessionId = '';
 
     if (this._resultCallback) this._resultCallback = null;
@@ -307,6 +313,7 @@ class IFlytekASRManager {
 
   resetSessionText() {
     this.currentSessionText = '';
+    this._baseSessionText = '';
   }
 
   blockAudio() {
