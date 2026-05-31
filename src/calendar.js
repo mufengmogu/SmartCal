@@ -1,10 +1,12 @@
 const Calendar = {
   currentDate: new Date(),
+  selectedDate: '',
   events: [],
 
   init() {
     const now = new Date();
     this.currentDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    this.selectedDate = this.formatDateStr(now.getFullYear(), now.getMonth(), now.getDate());
     this.render();
     this.bindEvents();
   },
@@ -44,6 +46,9 @@ const Calendar = {
       if (dateStr === todayStr) {
         cls = 'today';
       }
+      if (dateStr === this.selectedDate) {
+        cls += (cls ? ' ' : '') + 'selected';
+      }
       if (this.hasEvent(dateStr)) {
         cls += (cls ? ' ' : '') + 'has-event';
       }
@@ -68,7 +73,7 @@ const Calendar = {
   },
 
   hasEvent(dateStr) {
-    return this.events.some(e => e.date === dateStr);
+    return this.events.some(e => e.date === dateStr && e.status !== '已完成');
   },
 
   formatDateStr(year, month, day) {
@@ -92,5 +97,18 @@ const Calendar = {
   setMonth(year, month) {
     this.currentDate = new Date(year, month, 1);
     this.render();
+  },
+
+  selectDate(dateStr) {
+    this.selectedDate = dateStr;
+    this.render();
+  },
+
+  getSelectedDate() {
+    return this.selectedDate;
+  },
+
+  getEventsForDate(dateStr) {
+    return this.events.filter(e => e.date === dateStr && e.status !== '已完成');
   }
 };

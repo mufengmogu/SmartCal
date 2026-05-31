@@ -84,16 +84,18 @@ const EventsManager = {
     const noEvents = document.getElementById('no-events');
     eventsList.innerHTML = '';
 
-    const activeEvents = this.events.filter(e => e.status !== '已完成');
-    const completedEvents = this.events.filter(e => e.status === '已完成');
+    const selectedDate = Calendar.getSelectedDate();
+    const activeEvents = this.events.filter(e =>
+      e.status !== '已完成' && e.date === selectedDate
+    );
 
-    if (this.events.length === 0) {
+    if (activeEvents.length === 0) {
       noEvents.classList.remove('hidden');
       return;
     }
     noEvents.classList.add('hidden');
 
-    [...activeEvents, ...completedEvents].forEach(event => {
+    activeEvents.forEach(event => {
       eventsList.appendChild(this.createEventItem(event));
     });
   },

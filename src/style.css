@@ -586,6 +586,15 @@ body {
   font-size: 14px;
 }
 
+.day-cell.selected {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.day-cell.today.selected {
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.3);
+}
+
 .day-cell.has-event::after {
   content: "";
   position: absolute;
