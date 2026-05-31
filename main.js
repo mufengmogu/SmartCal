@@ -90,7 +90,18 @@ function readEvents() {
   try {
     ensureDataDir();
     const raw = fs.readFileSync(EVENTS_FILE, 'utf-8');
-    return JSON.parse(raw);
+    const events = JSON.parse(raw);
+    const migrated = events.map(e => ({
+      Id: e.Id || e.id,
+      name: e.name,
+      time: e.time || e.date,
+      state: e.state || e.status || '未完成',
+      voiceRemind: e.voiceRemind || false
+    }));
+    if (JSON.stringify(migrated) !== JSON.stringify(events)) {
+      writeEvents(migrated);
+    }
+    return migrated;
   } catch (e) {
     return [];
   }
@@ -106,12 +117,11 @@ ipcMain.handle('get-events', () => readEvents());
 ipcMain.handle('add-event', (event, newEvent) => {
   const events = readEvents();
   const eventWithId = {
-    id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+    Id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     name: newEvent.name,
-    date: newEvent.date,
-    status: '未完成',
-    voiceRemind: newEvent.voiceRemind || false,
-    createdAt: new Date().toISOString()
+    time: newEvent.date,
+    state: '未完成',
+    voiceRemind: newEvent.voiceRemind || false
   };
   events.push(eventWithId);
   writeEvents(events);
@@ -120,16 +130,16 @@ ipcMain.handle('add-event', (event, newEvent) => {
 
 ipcMain.handle('delete-event', (event, eventId) => {
   let events = readEvents();
-  events = events.filter(e => e.id !== eventId);
+  events = events.filter(e => e.Id !== eventId);
   writeEvents(events);
   return true;
 });
 
 ipcMain.handle('toggle-event-status', (event, eventId) => {
   const events = readEvents();
-  const target = events.find(e => e.id === eventId);
+  const target = events.find(e => e.Id === eventId);
   if (target) {
-    target.status = target.status === '已完成' ? '未完成' : '已完成';
+    target.state = target.state === '已完成' ? '未完成' : '已完成';
     writeEvents(events);
   }
   return target;
@@ -137,7 +147,7 @@ ipcMain.handle('toggle-event-status', (event, eventId) => {
 
 ipcMain.handle('update-event', (event, updatedEvent) => {
   const events = readEvents();
-  const idx = events.findIndex(e => e.id === updatedEvent.id);
+  const idx = events.findIndex(e => e.Id === updatedEvent.Id);
   if (idx !== -1) {
     events[idx] = { ...events[idx], ...updatedEvent };
     writeEvents(events);
@@ -232,18 +242,18 @@ ipcMain.handle('voice-ai-process', async (event, { text }) => {
 
 ipcMain.handle('find-event-by-name', (event, name) => {
   const events = readEvents();
-  const match = events.find(e => e.name === name && e.status !== '已完成');
+  const match = events.find(e => e.name === name && e.state !== '已完成');
   return match || null;
 });
 
 ipcMain.handle('update-event-by-name', (event, { oldName, newName, newDate }) => {
   const events = readEvents();
-  const idx = events.findIndex(e => e.name === oldName && e.status !== '已完成');
+  const idx = events.findIndex(e => e.name === oldName && e.state !== '已完成');
   if (idx === -1) {
     return { success: false, error: '未找到事件: ' + oldName };
   }
   if (newName) events[idx].name = newName;
-  if (newDate) events[idx].date = newDate;
+  if (newDate) events[idx].time = newDate;
   writeEvents(events);
   return { success: true, event: events[idx] };
 });

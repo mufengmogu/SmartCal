@@ -14,9 +14,9 @@ const EventsManager = {
 
   sortEvents() {
     this.events.sort((a, b) => {
-      if (a.status === '已完成' && b.status !== '已完成') return 1;
-      if (a.status !== '已完成' && b.status === '已完成') return -1;
-      return new Date(a.date) - new Date(b.date);
+      if (a.state === '已完成' && b.state !== '已完成') return 1;
+      if (a.state !== '已完成' && b.state === '已完成') return -1;
+      return new Date(a.time) - new Date(b.time);
     });
   },
 
@@ -31,16 +31,16 @@ const EventsManager = {
 
   async deleteEvent(eventId) {
     await window.electronAPI.deleteEvent(eventId);
-    this.events = this.events.filter(e => e.id !== eventId);
+    this.events = this.events.filter(e => e.Id !== eventId);
     this.render();
     Calendar.setEvents(this.events);
   },
 
   async toggleStatus(eventId) {
     const updated = await window.electronAPI.toggleEventStatus(eventId);
-    const target = this.events.find(e => e.id === eventId);
+    const target = this.events.find(e => e.Id === eventId);
     if (target) {
-      target.status = updated.status;
+      target.state = updated.state;
     }
     this.sortEvents();
     this.render();
@@ -66,10 +66,10 @@ const EventsManager = {
   async markEventCompletedByName(name) {
     const event = await window.electronAPI.findEventByName(name);
     if (event) {
-      const updated = await window.electronAPI.toggleEventStatus(event.id);
-      const target = this.events.find(e => e.id === event.id);
+      const updated = await window.electronAPI.toggleEventStatus(event.Id);
+      const target = this.events.find(e => e.Id === event.Id);
       if (target) {
-        target.status = updated.status;
+        target.state = updated.state;
       }
       this.sortEvents();
       this.render();
@@ -86,7 +86,7 @@ const EventsManager = {
 
     const selectedDate = Calendar.getSelectedDate();
     const activeEvents = this.events.filter(e =>
-      e.status !== '已完成' && e.date === selectedDate
+      e.state !== '已完成' && e.time === selectedDate
     );
 
     if (activeEvents.length === 0) {
@@ -102,14 +102,14 @@ const EventsManager = {
 
   createEventItem(event) {
     const item = document.createElement('div');
-    item.className = 'event-item' + (event.status === '已完成' ? ' completed' : '');
-    item.dataset.id = event.id;
+    item.className = 'event-item' + (event.state === '已完成' ? ' completed' : '');
+    item.dataset.id = event.Id;
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'event-checkbox';
-    checkbox.checked = event.status === '已完成';
-    checkbox.addEventListener('change', () => this.toggleStatus(event.id));
+    checkbox.checked = event.state === '已完成';
+    checkbox.addEventListener('change', () => this.toggleStatus(event.Id));
 
     const info = document.createElement('div');
     info.className = 'event-info';
@@ -122,11 +122,11 @@ const EventsManager = {
     meta.className = 'event-meta';
 
     const dateEl = document.createElement('span');
-    dateEl.textContent = '📅 ' + event.date;
+    dateEl.textContent = '📅 ' + event.time;
 
     const countdownEl = document.createElement('span');
     countdownEl.className = 'countdown';
-    countdownEl.textContent = this.getCountdown(event.date);
+    countdownEl.textContent = this.getCountdown(event.time);
 
     const voiceIcon = event.voiceRemind ? ' 🔊' : '';
     meta.appendChild(dateEl);
@@ -147,7 +147,7 @@ const EventsManager = {
     deleteBtn.title = '删除事件';
     deleteBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.deleteEvent(event.id);
+      this.deleteEvent(event.Id);
     });
 
     item.appendChild(checkbox);
@@ -183,11 +183,11 @@ const EventsManager = {
   getUrgentEvent() {
     const now = new Date();
     const active = this.events
-      .filter(e => e.status !== '已完成')
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
+      .filter(e => e.state !== '已完成')
+      .sort((a, b) => new Date(a.time) - new Date(b.time));
 
     for (const event of active) {
-      const target = new Date(event.date + 'T23:59:59');
+      const target = new Date(event.time + 'T23:59:59');
       const diff = target - now;
 
       if (diff <= 0) {

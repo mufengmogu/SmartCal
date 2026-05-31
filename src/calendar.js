@@ -14,6 +14,7 @@ const Calendar = {
   setEvents(events) {
     this.events = events;
     this.render();
+    if (this._onEventsChanged) this._onEventsChanged();
   },
 
   render() {
@@ -37,7 +38,14 @@ const Calendar = {
       const dateStr = month === 0
         ? this.formatDateStr(year - 1, 11, day)
         : this.formatDateStr(year, month - 1, day);
-      grid.appendChild(this.createDayCell(day, 'other-month', dateStr));
+      let cls = 'other-month';
+      if (dateStr === this.selectedDate) {
+        cls += ' selected';
+      }
+      if (this.hasEvent(dateStr)) {
+        cls += ' has-event';
+      }
+      grid.appendChild(this.createDayCell(day, cls, dateStr));
     }
 
     for (let day = 1; day <= daysInMonth; day++) {
@@ -60,7 +68,14 @@ const Calendar = {
       const dateStr = month === 11
         ? this.formatDateStr(year + 1, 0, day)
         : this.formatDateStr(year, month + 1, day);
-      grid.appendChild(this.createDayCell(day, 'other-month', dateStr));
+      let cls = 'other-month';
+      if (dateStr === this.selectedDate) {
+        cls += ' selected';
+      }
+      if (this.hasEvent(dateStr)) {
+        cls += ' has-event';
+      }
+      grid.appendChild(this.createDayCell(day, cls, dateStr));
     }
   },
 
@@ -73,7 +88,7 @@ const Calendar = {
   },
 
   hasEvent(dateStr) {
-    return this.events.some(e => e.date === dateStr && e.status !== '已完成');
+    return this.events.some(e => e.time === dateStr && e.state !== '已完成');
   },
 
   formatDateStr(year, month, day) {
@@ -109,6 +124,6 @@ const Calendar = {
   },
 
   getEventsForDate(dateStr) {
-    return this.events.filter(e => e.date === dateStr && e.status !== '已完成');
+    return this.events.filter(e => e.time === dateStr && e.state !== '已完成');
   }
 };

@@ -579,6 +579,14 @@ body {
   opacity: 0.4;
 }
 
+.day-cell.other-month.has-event {
+  opacity: 0.55;
+}
+
+.day-cell.other-month.selected {
+  opacity: 1;
+}
+
 .day-cell.today {
   background: var(--today-bg);
   color: var(--today-text);
@@ -588,25 +596,30 @@ body {
 
 .day-cell.selected {
   border: 2px solid var(--accent);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.25), 0 0 8px rgba(233, 69, 96, 0.15);
 }
 
 .day-cell.today.selected {
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.3);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3), 0 0 8px rgba(255, 255, 255, 0.15);
 }
 
 .day-cell.has-event::after {
   content: "";
   position: absolute;
-  bottom: 3px;
-  width: 5px;
-  height: 5px;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: #ff6b35;
+  box-shadow: 0 0 4px rgba(255, 107, 53, 0.5);
 }
 
 .day-cell.today.has-event::after {
   background: #fff;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.6);
 }
 
 .urgent-alert {
