@@ -57,7 +57,7 @@ const App = {
         } else {
           alertText.textContent = `📌 最近事件：${urgent.event.name}（${urgent.event.time}）`;
           alertEl.querySelector('.urgent-alert-content').style.animation = 'none';
-          alertEl.querySelector('.urgent-alert-content').style.background = 'var(--bg-card)';
+          alertEl.querySelector('.urgent-alert-content').style.background = 'var(--accent-hover)';
           alertEl.querySelector('.urgent-alert-content').style.boxShadow = 'none';
         }
       } else {
