@@ -256,17 +256,31 @@ ipcMain.handle('voice-ai-process', async (event, { text }) => {
   }
 });
 
-ipcMain.handle('find-event-by-name', (event, name) => {
+ipcMain.handle('find-event-by-name', (event, { name, time }) => {
   const events = readEvents();
-  const match = events.find(e => e.name === name && e.state !== '已完成');
+  const match = events.find(e => {
+    if (e.state === '已完成') return false;
+    const nameMatch = e.name.includes(name) || name.includes(e.name);
+    if (time) {
+      return nameMatch && e.time === time;
+    }
+    return nameMatch;
+  });
   return match || null;
 });
 
-ipcMain.handle('update-event-by-name', (event, { oldName, newName, newDate }) => {
+ipcMain.handle('update-event-by-name', (event, { oldName, newName, newDate, time }) => {
   const events = readEvents();
-  const idx = events.findIndex(e => e.name === oldName && e.state !== '已完成');
+  const idx = events.findIndex(e => {
+    if (e.state === '已完成') return false;
+    const nameMatch = e.name.includes(oldName) || oldName.includes(e.name);
+    if (time) {
+      return nameMatch && e.time === time;
+    }
+    return nameMatch;
+  });
   if (idx === -1) {
-    return { success: false, error: '未找到事件: ' + oldName };
+    return { success: false, error: '未找到匹配事件' };
   }
   if (newName) events[idx].name = newName;
   if (newDate) events[idx].time = newDate;

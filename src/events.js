@@ -52,8 +52,8 @@ const EventsManager = {
     return event;
   },
 
-  async updateEventByName(oldName, newName, newDate) {
-    const result = await window.electronAPI.updateEventByName(oldName, newName, newDate);
+  async updateEventByName(oldName, newName, newDate, time) {
+    const result = await window.electronAPI.updateEventByName(oldName, newName, newDate, time);
     if (result.success) {
       this.events = await window.electronAPI.getEvents();
       this.sortEvents();
@@ -63,8 +63,8 @@ const EventsManager = {
     return result;
   },
 
-  async markEventCompletedByName(name) {
-    const event = await window.electronAPI.findEventByName(name);
+  async markEventCompletedByName(name, time) {
+    const event = await window.electronAPI.findEventByName(name, time);
     if (event) {
       const updated = await window.electronAPI.toggleEventStatus(event.Id);
       const target = this.events.find(e => e.Id === event.Id);
@@ -76,7 +76,7 @@ const EventsManager = {
       Calendar.setEvents(this.events);
       return { success: true };
     }
-    return { success: false, error: '未找到事件: ' + name };
+    return { success: false, error: '未找到匹配事件' };
   },
 
   render() {
