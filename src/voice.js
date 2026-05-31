@@ -356,6 +356,7 @@ const VoiceManager = {
       console.log('[百炼AI返回] name: ' + (aiResult.name || ''));
       console.log('[百炼AI返回] time: ' + (aiResult.time || ''));
       console.log('[百炼AI返回] oldName: ' + (aiResult.oldName || ''));
+      console.log('[百炼AI返回] oldTime: ' + (aiResult.oldTime || ''));
       console.log('[百炼AI返回] message: ' + (aiResult.message || ''));
       console.log('[百炼AI返回] 原始完整结果: ' + JSON.stringify(aiResult));
       console.log('========================================');
@@ -389,18 +390,30 @@ const VoiceManager = {
           break;
 
         case 'delete':
-          this.log('info', 'AI识别为删除操作 -> name: "' + aiResult.name + '"');
-          await EventsManager.markEventCompletedByName(aiResult.name);
-          this.showChatBubble('操作成功');
-          this.speakResponse('操作成功');
+          this.log('info', 'AI识别为删除操作 -> name: "' + aiResult.name + '", time: "' + (aiResult.time || '') + '"');
+          const delDate = this.parseDateString(aiResult.time);
+          const deleteResult = await EventsManager.markEventCompletedByName(aiResult.name, delDate);
+          if (deleteResult.success) {
+            this.showChatBubble('操作成功');
+            this.speakResponse('操作成功');
+          } else {
+            this.showChatBubble('操作失败');
+            this.speakResponse('操作失败');
+          }
           break;
 
         case 'modify':
-          this.log('info', 'AI识别为修改操作 -> 修改前: "' + aiResult.oldName + '", 修改后: "' + aiResult.name + '", time: "' + aiResult.time + '"');
-          const modDate = this.parseDateString(aiResult.time);
-          await EventsManager.updateEventByName(aiResult.oldName, aiResult.name, modDate);
-          this.showChatBubble('操作成功');
-          this.speakResponse('操作成功');
+          this.log('info', 'AI识别为修改操作 -> 修改前: name="' + (aiResult.oldName || '') + '", time="' + (aiResult.oldTime || '') + '"; 修改后: name="' + (aiResult.name || '') + '", time="' + (aiResult.time || '') + '"');
+          const modOldDate = this.parseDateString(aiResult.oldTime);
+          const modNewDate = this.parseDateString(aiResult.time);
+          const modifyResult = await EventsManager.updateEventByName(aiResult.oldName, aiResult.name, modNewDate, modOldDate);
+          if (modifyResult.success) {
+            this.showChatBubble('操作成功');
+            this.speakResponse('操作成功');
+          } else {
+            this.showChatBubble('操作失败');
+            this.speakResponse('操作失败');
+          }
           break;
 
         default:

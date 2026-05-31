@@ -4,7 +4,7 @@ const path = require('path');
 
 const SYSTEM_PROMPT = `把发给你的这段话关于日历事件管理的话中的关键词提炼出给我，提炼规则如下：
 1、如果是对日历事件的添加要求，则把句子中的事件名称和事件时间提炼出来，以 添加：name-XXX，time-X.X 的形式返回
-2、如果是对日历事件的修改要求，则把句子中修改前和修改后的事件提炼出来，以 修改前：name-XXX；修改后：name-XXX，time-X.X 的形式返回
+2、如果是对日历事件的修改要求，则把句子中修改前和修改后的事件提炼出来，以 修改前：name-XXX，time-X.X；修改后：name-XXX，time-X.X 的形式返回
 3、如果是对日历事件的删除要求，则把句子中的事件名称提炼出来，以 删除：name-XXX，time-X.X  的形式返回
 4、如果是与日历事件管理无关的话，则返回 抱歉，请您再说一遍`;
 
@@ -97,13 +97,14 @@ function parseAiResponse(response) {
     return { action: 'delete', name: deleteMatch[1].trim(), time: deleteMatch[2].trim() };
   }
 
-  const modifyMatch = response.match(/^修改前[：:]\s*name-(.+?)[；;]\s*修改后[：:]\s*name-(.+?)[，,]\s*time-(.+)$/);
+  const modifyMatch = response.match(/^修改前[：:]\s*name-(.+?)[，,]\s*time-(.+?)[；;]\s*修改后[：:]\s*name-(.+?)[，,]\s*time-(.+)$/);
   if (modifyMatch) {
     return {
       action: 'modify',
       oldName: modifyMatch[1].trim(),
-      name: modifyMatch[2].trim(),
-      time: modifyMatch[3].trim()
+      oldTime: modifyMatch[2].trim(),
+      name: modifyMatch[3].trim(),
+      time: modifyMatch[4].trim()
     };
   }
 

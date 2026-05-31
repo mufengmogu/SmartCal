@@ -21,8 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   voiceQwenConfigure: (config) => ipcRenderer.invoke('voice-qwen-configure', config),
   voiceQwenProcessText: (text) => ipcRenderer.invoke('voice-qwen-process-text', text),
   voiceAiProcess: (text) => ipcRenderer.invoke('voice-ai-process', { text }),
-  findEventByName: (name) => ipcRenderer.invoke('find-event-by-name', name),
-  updateEventByName: (oldName, newName, newDate) => ipcRenderer.invoke('update-event-by-name', { oldName, newName, newDate }),
+  findEventByName: (name, time) => ipcRenderer.invoke('find-event-by-name', { name, time }),
+  updateEventByName: (oldName, newName, newDate, time) => ipcRenderer.invoke('update-event-by-name', { oldName, newName, newDate, time }),
   voiceSaveConfig: (config) => ipcRenderer.invoke('voice-save-config', config),
   voiceLoadConfig: () => ipcRenderer.invoke('voice-load-config'),
 
