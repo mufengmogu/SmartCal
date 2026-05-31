@@ -1,12 +1,11 @@
 const VoiceManager = {
   isEnabled: false,
   isWoken: false,
+  isAnalyzing: false,
   mediaStream: null,
   audioContext: null,
   wakeWord: '重启',
-  silenceTimer: null,
   voiceConfig: {},
-  puppyAwakeTimer: null,
   detectionMethod: 'iflytek-asr',
   _debugLogs: [],
   _audioProcessor: null,
@@ -14,7 +13,8 @@ const VoiceManager = {
   _postWakeupText: '',
   _commandSilenceTimer: null,
   _wakeupFullText: '',
-  _wakeTimeoutTimer: null,
+  _awakenedSilenceTimer: null,
+  _analysisTimeoutTimer: null,
 
   log(level, msg) {
     const ts = new Date().toLocaleTimeString();
@@ -51,6 +51,7 @@ const VoiceManager = {
 
     window.electronAPI.onVoiceAsrResult((data) => {
       if (!data || !data.text) return;
+      if (this.isAnalyzing) return;
 
       if (data.text) {
         console.log('[ASR转写] ' + data.text + (data.isFinal ? ' [最终]' : ''));
@@ -151,7 +152,7 @@ const VoiceManager = {
     this._audioProcessor = processor;
 
     processor.onaudioprocess = (event) => {
-      if (!this.isEnabled) return;
+      if (!this.isEnabled || this.isAnalyzing) return;
 
       const input = event.inputBuffer.getChannelData(0);
       const pcmBuffer = this.float32ToInt16(input);
@@ -178,23 +179,14 @@ const VoiceManager = {
     this.log('info', '关闭语音...');
     this.isEnabled = false;
     this.isWoken = false;
+    this.isAnalyzing = false;
+    this._isReturningToAwakened = false;
     this._asrConnected = false;
     this.setPuppySleeping();
 
-    if (this.puppyAwakeTimer) {
-      clearTimeout(this.puppyAwakeTimer);
-      this.puppyAwakeTimer = null;
-    }
-
-    if (this._commandSilenceTimer) {
-      clearTimeout(this._commandSilenceTimer);
-      this._commandSilenceTimer = null;
-    }
-
-    if (this._wakeTimeoutTimer) {
-      clearTimeout(this._wakeTimeoutTimer);
-      this._wakeTimeoutTimer = null;
-    }
+    this.clearCommandSilenceTimer();
+    this.clearAwakenedSilenceTimer();
+    this.clearAnalysisTimeout();
 
     if (this._audioProcessor) {
       this._audioProcessor.disconnect();
@@ -214,7 +206,6 @@ const VoiceManager = {
     window.electronAPI.voiceAsrStop();
 
     this.detectionMethod = 'none';
-    this.resetSilenceTimer();
     this.hideVoiceStatus();
     this.hideTranscript();
     this.log('info', '语音已完全关闭');
@@ -235,7 +226,7 @@ const VoiceManager = {
     this.speakResponse('我在');
     this.log('info', '小狗唤醒 + TTS 播报"我在"，开始从ASR捕获后续文本');
 
-    this.startWakeTimeout();
+    this.startAwakenedSilenceTimer();
   },
 
   testWakeup() {
@@ -291,12 +282,15 @@ const VoiceManager = {
   },
 
   async processVoiceInput(text) {
-    this.log('info', 'processVoiceInput: "' + text + '"');
+    this.log('info', '进入分析状态: "' + text + '"');
     if (!text) {
-      this.resetWakeupState();
+      await this.returnToAwakenedState();
       return;
     }
 
+    this.isAnalyzing = true;
+    this.clearAwakenedSilenceTimer();
+    this.startAnalysisTimeout();
     this.showVoiceStatus('AI正在分析...', 'listening');
 
     try {
@@ -311,11 +305,15 @@ const VoiceManager = {
       console.log('========================================');
       this.log('debug', 'AI解析结果: ' + JSON.stringify(aiResult));
 
+      if (this._isReturningToAwakened || !this.isAnalyzing) {
+        this.log('info', 'AI返回前系统已结束分析状态，忽略结果');
+        return;
+      }
+
       if (!aiResult.success) {
         this.log('error', 'AI调用失败: ' + (aiResult.error || '未知错误'));
-        this.log('info', 'AI失败，尝试自然语言解析');
-        this.processNaturalLanguage(text);
-        this.resetWakeupState();
+        this.speakResponse('抱歉，请您再说一遍');
+        await this.returnToAwakenedState();
         return;
       }
 
@@ -325,55 +323,34 @@ const VoiceManager = {
           const addDate = this.parseDateString(aiResult.time);
           if (addDate && aiResult.name && aiResult.name.trim()) {
             await EventsManager.addParsedEvent(aiResult.name.trim(), addDate);
-            this.speakResponse('操作成功');
-            this.showVoiceStatus('事件已添加！', 'idle');
-          } else {
-            this.speakResponse('操作成功');
-            this.showVoiceStatus('事件已添加！', 'idle');
           }
+          this.speakResponse('操作成功');
           break;
 
         case 'delete':
           this.log('info', 'AI识别为删除操作 -> name: "' + aiResult.name + '"');
-          const delResult = await EventsManager.markEventCompletedByName(aiResult.name);
-          if (delResult.success) {
-            this.speakResponse('操作成功');
-            this.showVoiceStatus('事件已标记完成！', 'idle');
-          } else {
-            this.speakResponse('操作成功');
-            this.showVoiceStatus('事件已标记完成！', 'idle');
-          }
+          await EventsManager.markEventCompletedByName(aiResult.name);
+          this.speakResponse('操作成功');
           break;
 
         case 'modify':
           this.log('info', 'AI识别为修改操作 -> 修改前: "' + aiResult.oldName + '", 修改后: "' + aiResult.name + '", time: "' + aiResult.time + '"');
           const modDate = this.parseDateString(aiResult.time);
-          const modResult = await EventsManager.updateEventByName(aiResult.oldName, aiResult.name, modDate);
-          if (modResult.success) {
-            this.speakResponse('操作成功');
-            this.showVoiceStatus('事件已修改！', 'idle');
-          } else {
-            this.speakResponse('操作成功');
-            this.showVoiceStatus('事件已修改！', 'idle');
-          }
+          await EventsManager.updateEventByName(aiResult.oldName, aiResult.name, modDate);
+          this.speakResponse('操作成功');
           break;
 
         default:
           this.log('info', 'AI未识别为日历事件, message: ' + (aiResult.message || ''));
           this.speakResponse('抱歉，请您再说一遍');
-          this.showVoiceStatus('未能理解，请重试', 'idle');
-          this._postWakeupText = '';
-          this.startWakeTimeout();
-          this.resetCommandSilenceTimer();
-          return;
+          break;
       }
     } catch (e) {
       this.log('error', 'AI处理异常: ' + e.message);
-      this.log('info', '异常后尝试自然语言解析');
-      this.processNaturalLanguage(text);
+      this.speakResponse('抱歉，请您再说一遍');
     }
 
-    this.resetWakeupState();
+    await this.returnToAwakenedState();
   },
 
   processNaturalLanguage(text) {
@@ -480,31 +457,44 @@ const VoiceManager = {
     }
   },
 
-  resetSilenceTimer() {
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
-    this.silenceTimer = setTimeout(() => {
-      this.log('debug', '静默超时(15s)，重置唤醒状态');
+  startAwakenedSilenceTimer() {
+    this.clearAwakenedSilenceTimer();
+    this._awakenedSilenceTimer = setTimeout(() => {
+      if (!this.isWoken || this.isAnalyzing) return;
+      this.log('info', '已唤醒状态15秒无输入，回归唤醒等待状态');
+      this.speakResponse('等待超时，请重新唤醒');
       this.resetWakeupState();
     }, 15000);
   },
 
-  startWakeTimeout() {
-    this.clearWakeTimeout();
-    this._wakeTimeoutTimer = setTimeout(() => {
-      if (!this.isWoken) return;
-      this.log('info', '唤醒后10秒无有效输入，回归等待唤醒状态');
-      this.speakResponse('等待超时，请重新唤醒');
-      this.resetWakeupState();
-    }, 10000);
+  clearAwakenedSilenceTimer() {
+    if (this._awakenedSilenceTimer) {
+      clearTimeout(this._awakenedSilenceTimer);
+      this._awakenedSilenceTimer = null;
+    }
   },
 
-  clearWakeTimeout() {
-    if (this._wakeTimeoutTimer) {
-      clearTimeout(this._wakeTimeoutTimer);
-      this._wakeTimeoutTimer = null;
+  startAnalysisTimeout() {
+    this.clearAnalysisTimeout();
+    this._analysisTimeoutTimer = setTimeout(() => {
+      if (!this.isAnalyzing) return;
+      this.log('info', 'AI分析30秒超时，返回已唤醒状态');
+      this.speakResponse('抱歉，请您再说一遍');
+      this.returnToAwakenedState();
+    }, 30000);
+  },
+
+  clearAnalysisTimeout() {
+    if (this._analysisTimeoutTimer) {
+      clearTimeout(this._analysisTimeoutTimer);
+      this._analysisTimeoutTimer = null;
+    }
+  },
+
+  clearCommandSilenceTimer() {
+    if (this._commandSilenceTimer) {
+      clearTimeout(this._commandSilenceTimer);
+      this._commandSilenceTimer = null;
     }
   },
 
@@ -514,27 +504,43 @@ const VoiceManager = {
       this._commandSilenceTimer = null;
     }
     this._commandSilenceTimer = setTimeout(() => {
-      if (!this.isWoken || !this._postWakeupText.trim()) return;
+      if (!this.isWoken || this.isAnalyzing || !this._postWakeupText.trim()) return;
       const textToProcess = this._postWakeupText;
       this._postWakeupText = '';
-      this.log('info', '用户停止说话2秒，发送命令文本: "' + textToProcess + '"');
+      this.log('info', '用户停止说话2秒，进入分析状态，发送: "' + textToProcess + '"');
       this.processVoiceInput(textToProcess);
     }, 2000);
   },
 
-  resetWakeupState() {
-    this.isWoken = false;
+  async returnToAwakenedState() {
+    if (this._isReturningToAwakened) return;
+    this._isReturningToAwakened = true;
+
+    await window.electronAPI.voiceAsrReset();
+
+    this.isAnalyzing = false;
     this._postWakeupText = '';
     this._wakeupFullText = '';
-    if (this._commandSilenceTimer) {
-      clearTimeout(this._commandSilenceTimer);
-      this._commandSilenceTimer = null;
-    }
-    this.clearWakeTimeout();
+    this.clearCommandSilenceTimer();
+    this.clearAnalysisTimeout();
+    this.clearAwakenedSilenceTimer();
+    this._isReturningToAwakened = false;
+    this.log('info', '返回已唤醒状态，继续等待用户说话');
+    this.showVoiceStatus('我在！请说事件...', 'listening');
+    this.startAwakenedSilenceTimer();
+  },
+
+  resetWakeupState() {
+    this.isWoken = false;
+    this.isAnalyzing = false;
+    this._postWakeupText = '';
+    this._wakeupFullText = '';
+    this.clearCommandSilenceTimer();
+    this.clearAwakenedSilenceTimer();
+    this.clearAnalysisTimeout();
     this.setPuppySleeping();
-    this.resetSilenceTimer();
     this.hideTranscript();
     window.electronAPI.voiceAsrReset();
-    this.log('info', '重置唤醒状态，继续监听关键词');
+    this.log('info', '回归唤醒等待状态，继续监听关键词');
   }
 };
