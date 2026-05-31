@@ -30,26 +30,17 @@ const App = {
       const dateStr = cell.dataset.date;
       if (!dateStr) return;
 
-      const eventsOnDate = EventsManager.events.filter(ev => ev.date === dateStr);
+      Calendar.selectDate(dateStr);
+      EventsManager.render();
 
-      if (eventsOnDate.length === 1) {
-        const event = eventsOnDate[0];
-        if (event.status !== '已完成') {
-          EventsManager.toggleStatus(event.id);
-        }
-      } else if (eventsOnDate.length > 1) {
-        this.showDayEvents(dateStr, eventsOnDate);
-      } else {
+      const eventsOnDate = EventsManager.events.filter(
+        ev => ev.date === dateStr && ev.status !== '已完成'
+      );
+
+      if (eventsOnDate.length === 0) {
         EventsManager.showAddModal(dateStr);
       }
     });
-  },
-
-  showDayEvents(dateStr, events) {
-    const names = events.map(e =>
-      `${e.status === '已完成' ? '[✓]' : '[ ]'} ${e.name}`
-    ).join('\n');
-    alert(`${dateStr} 的事件：\n${names}`);
   },
 
   startUrgentCheck() {
