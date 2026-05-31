@@ -10,6 +10,8 @@ const App = {
     this.bindCalendarDayClick();
     this.startUrgentCheck();
     this.startCountdownUpdate();
+
+    Calendar._onEventsChanged = () => this._checkUrgent();
   },
 
   bindWindowControls() {
@@ -32,14 +34,6 @@ const App = {
 
       Calendar.selectDate(dateStr);
       EventsManager.render();
-
-      const eventsOnDate = EventsManager.events.filter(
-        ev => ev.date === dateStr && ev.status !== '已完成'
-      );
-
-      if (eventsOnDate.length === 0) {
-        EventsManager.showAddModal(dateStr);
-      }
     });
   },
 
@@ -53,15 +47,15 @@ const App = {
         alertEl.classList.remove('hidden');
 
         if (urgent.type === 'overdue') {
-          alertText.textContent = `⚠ 事件已到期：${urgent.event.name}（${urgent.event.date}）`;
+          alertText.textContent = `⚠ 事件已到期：${urgent.event.name}（${urgent.event.time}）`;
           alertEl.querySelector('.urgent-alert-content').style.animation =
             'alert-flash 0.5s infinite';
         } else if (urgent.type === 'urgent') {
-          alertText.textContent = `⏰ 即将到期：${urgent.event.name}（${urgent.event.date}）`;
+          alertText.textContent = `⏰ 即将到期：${urgent.event.name}（${urgent.event.time}）`;
           alertEl.querySelector('.urgent-alert-content').style.animation =
             'alert-flash 1s infinite';
         } else {
-          alertText.textContent = `📌 最近事件：${urgent.event.name}（${urgent.event.date}）`;
+          alertText.textContent = `📌 最近事件：${urgent.event.name}（${urgent.event.time}）`;
           alertEl.querySelector('.urgent-alert-content').style.animation = 'none';
           alertEl.querySelector('.urgent-alert-content').style.background = 'var(--bg-card)';
           alertEl.querySelector('.urgent-alert-content').style.boxShadow = 'none';
@@ -71,6 +65,7 @@ const App = {
       }
     };
 
+    this._checkUrgent = checkUrgent;
     checkUrgent();
     setInterval(checkUrgent, 10000);
   },
@@ -81,7 +76,7 @@ const App = {
       const events = EventsManager.events;
       countdownEls.forEach((el, idx) => {
         if (idx < events.length) {
-          el.textContent = EventsManager.getCountdown(events[idx].date);
+          el.textContent = EventsManager.getCountdown(events[idx].time);
         }
       });
     }, 60000);
