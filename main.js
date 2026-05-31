@@ -215,6 +215,22 @@ ipcMain.handle('voice-asr-reset', async () => {
   return { success: false, error: 'ASR模块未初始化' };
 });
 
+ipcMain.handle('voice-asr-block-audio', async () => {
+  if (asrManager) {
+    asrManager.blockAudio();
+    return { success: true };
+  }
+  return { success: false, error: 'ASR模块未初始化' };
+});
+
+ipcMain.handle('voice-asr-unblock-audio', async () => {
+  if (asrManager) {
+    asrManager.unblockAudio();
+    return { success: true };
+  }
+  return { success: false, error: 'ASR模块未初始化' };
+});
+
 ipcMain.on('voice-asr-audio', (event, audioData) => {
   if (asrManager && asrManager.isRunning) {
     asrManager.feedAudio(audioData);
